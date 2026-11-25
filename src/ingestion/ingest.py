@@ -35,13 +35,17 @@ def chunk_text(text: str) -> list[str]:
 def embed_batch(texts: list[str]) -> list[list[float]]:
     res = client.models.embed_content(
         model=EMBED_MODEL,
-        contents=texts,
+        # One Content per text. A plain list of strings is merged into a single
+        # embedding by gemini-embedding-2, which silently dropped most chunks.
+        contents=[types.Content(parts=[types.Part(text=t)]) for t in texts],
         config=types.EmbedContentConfig(
             task_type="RETRIEVAL_DOCUMENT",
             output_dimensionality=EMBED_DIM,
         ),
     )
-    return [e.values for e in res.embeddings]
+    vecs = [e.values for e in res.embeddings]
+    assert len(vecs) == len(texts), f"Got {len(vecs)} embeddings for {len(texts)} texts"
+    return vecs
 
 def ingest_policies(pdf_dir: Path = Path("data/policies")):
     init_schema()

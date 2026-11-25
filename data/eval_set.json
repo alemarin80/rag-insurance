@@ -1,78 +1,78 @@
 [
   {
     "type": "exact_lookup",
-    "question": "Hvor mange dager etter et eierskifte gjelder forsikringen min dersom den nye eieren ikke har tegnet egen avtale?",
-    "expected_source": "fremtind_bil_kasko.pdf#p1"
-  },
-  {
-    "type": "exact_lookup",
-    "question": "Ved hvilken alder slutter ulykkesforsikringen å gjelde?",
-    "expected_source": "fremtind_reise.pdf#p1"
-  },
-  {
-    "type": "exact_lookup",
-    "question": "Hvor lenge gjelder innboforsikringen etter et eierskifte hvis den nye eieren ikke har tegnet egen forsikring ennå?",
-    "expected_source": "fremtind_innbo_topp.pdf#p1"
-  },
-  {
-    "type": "exact_lookup",
-    "question": "Hvor lenge gjelder innboforsikringen etter et eierskifte hvis den nye eieren ikke har skaffet seg egen forsikring?",
-    "expected_source": "fremtind_innbo_standard.pdf#p1"
-  },
-  {
-    "type": "exact_lookup",
-    "question": "Når dekkes utgifter til søksmål hvis saken gjelder et offentlig forvaltningsvedtak?",
+    "question": "Gjelder retten til rettshjelp ved tvist knyttet til kjøp av tomt for bygging av egen bolig bare hvis nåværende bolig var forsikret hos selskapet på kjøpstidspunktet?",
     "expected_source": "fremtind_reise.pdf#p14"
   },
   {
-    "type": "messy_user",
-    "question": "Jeg solgte bilen min i går, og nå ringte kjøperen og sa han har krasjet før han rakk å ordne seg egen forsikring – gjelder min fortsatt, eller er jeg helt ille ute nå?",
-    "expected_source": "fremtind_bil_ansvar.pdf#p1"
+    "type": "exact_lookup",
+    "question": "Hva er egenandelen ved tyveri av sykkel registrert i FG-godkjent sykkelregister?",
+    "expected_source": "fremtind_innbo_topp.pdf#p8"
+  },
+  {
+    "type": "exact_lookup",
+    "question": "Hvis bilen er under ett år gammel og har kjørt under 15 000 km, hva må reparasjonskostnadene overstige i prosent for at jeg skal få en ny bil ved totalskade?",
+    "expected_source": "fremtind_bil_kasko.pdf#p5"
+  },
+  {
+    "type": "exact_lookup",
+    "question": "Hva er maksimale erstatningen per skadetilfelle for tannlegebehandling ved ulykkesskade på reise?",
+    "expected_source": "fremtind_reise.pdf#p6"
+  },
+  {
+    "type": "exact_lookup",
+    "question": "Dekkes skader som umiddelbart skyldes frost?",
+    "expected_source": "fremtind_innbo_topp.pdf#p13"
   },
   {
     "type": "messy_user",
-    "question": "Hei, vi har akkurat gått fra hverandre og jeg flyttet ut for tre uker siden, men jeg har ikke rukket å ordne ny forsikring ennå – er tingene mine fortsatt dekket?",
-    "expected_source": "fremtind_innbo_standard.pdf#p1"
+    "question": "Jeg er helt stressa etter et lite uhell der barnet slo seg i barnehagen, og legen har sagt at jeg må gå til fysioterapi. Kan forsikringen dekke fysioterapi, lege- og tannlegeutgifter og kjøring mellom hjemmet og behandlingene, og hva er grensene og tidsfristene?",
+    "expected_source": "fremtind_reise.pdf#p9"
   },
   {
     "type": "messy_user",
-    "question": "Hei, kommunen har akkurat fattet et vedtak mot meg som jeg er helt uenig i, og jeg skjønner ikke hvordan jeg skal komme noen vei uten hjelp. Kan dere hjelpe meg med å betale for advokat mens jeg klager på dette?",
-    "expected_source": "fremtind_reise.pdf#p14"
+    "question": "Er sutstyr, våpen med tilbehør og kjøreutstyr til motorkjøretøy dekket hvis noe skjer?",
+    "expected_source": "fremtind_reise.pdf#p2"
   },
   {
     "type": "messy_user",
-    "question": "Hei, jeg solgte bilen min for et par dager siden, og nå sier han som kjøpte den at han ikke har fått ordnet forsikring ennå og har vært borti noe. Gjelder min forsikring fortsatt da, eller?",
-    "expected_source": "fremtind_bil_kasko.pdf#p1"
+    "question": "Jeg er helt stressa og blir litt forvirra, men kan du forklare hva som skjer hvis bilen min ble reparert hos et Fremtind-avtaleverksted og en byttet del viste seg å være slitt – hvordan blir fradrag og erstatning bestemt, hva skjer hvis den utskiftede delen ikke kan fremvises eller ikke finnes i markedet, får jeg kontantoppgjør, og hva med leiebil og den 8-års reparasjonsgarantien?",
+    "expected_source": "fremtind_bil_kasko.pdf#p6"
   },
   {
     "type": "messy_user",
-    "question": "Hei, vi skal reise på ferie i morgen og jeg ble plutselig veldig stressa – gjelder reiseforsikringen min også for samboeren min og barnebarnet vårt som skal være med på turen?",
-    "expected_source": "fremtind_reise.pdf#p1"
+    "question": "Hvordan vet jeg hvilke frister som gjelder for å melde fra til dere, hvordan velger jeg advokat, og hvilke utgifter blir dekket når saken min går videre til forvaltningsbehandling eller domstol ?",
+    "expected_source": "fremtind_bil_ansvar.pdf#p6"
+  },
+  {
+    "type": "messy_user",
+    "question": "Hei, jeg er litt stressa nå og skjønte ikke helt hvordan det fungerer hvis regningen blir større enn egenandelen – hva skjer da, får jeg hele beløpet dekket eller må jeg betale noe selv?",
+    "expected_source": "fremtind_innbo_standard.pdf#p7"
   },
   {
     "type": "exclusion_edge",
-    "question": "Jeg og ektefellen min har fått bevilling til separasjon, men avgjørelsen er ikke endelig ennå – gjelder innboforsikringen min fortsatt for ham?",
-    "expected_source": "fremtind_innbo_topp.pdf#p1"
+    "question": "Hvis en motorvogn eies av et selskap og brukes i næringsvirksomhet, og bilen står lagret på privat eiendom i Norge, dekkes naturskade da av unntaket for «varer i næringsvirksomhet og befinner seg på land i Norge», eller må bilen være lagret i en spesifikk næringslokasjon gjennom hele skadeforløpet?",
+    "expected_source": "fremtind_innbo_standard.pdf#p11"
   },
   {
     "type": "exclusion_edge",
-    "question": "Gjelder reiseforsikringen for barnet vårt som er født av surrogatmor i utlandet på selve hjemreisen til Norge, før vi har kommet frem til boligen vår?",
-    "expected_source": "fremtind_reise.pdf#p1"
+    "question": "Hvis forsikringsselskapet allerede har besluttet snarlig hjemtransport for meg etter en ulykke, er tilkalling av min nærmeste pårørende fortsatt dekket hvis pårørende må komme til meg i utlandet for å passe på meg?",
+    "expected_source": "fremtind_reise.pdf#p6"
   },
   {
     "type": "exclusion_edge",
-    "question": "Hvis jeg kjører i den europeiske delen av Tyrkia, gjelder bilforsikringen min der?",
-    "expected_source": "fremtind_bil_kasko.pdf#p1"
+    "question": "Gjelder regelen om at alle skader som skyldes samme skadevoldende begivenhet regnes som ett skadetilfelle og relateres til tidspunktet for første skade ble konstatert, også hvis første skade ble konstatert like før forsikringstiden utløp og en ny skade fra samme hendelse ble konstatert i en ny forsikringsperiode?",
+    "expected_source": "fremtind_innbo_standard.pdf#p7"
   },
   {
     "type": "exclusion_edge",
-    "question": "Jeg skal kjøre til den europeiske delen av Tyrkia, gjelder bilforsikringen min der siden det teknisk sett er i Europa?",
-    "expected_source": "fremtind_bil_ansvar.pdf#p1"
+    "question": "Gjelder begrensningen 'innfatningen for isolerglass er utett uansett årsak/punktering' også hvis lekkasjen skyldes en produsentfeil som ble oppdaget etter at vinduet ble installert, og lekkasjen oppsto uavhengig av ytre påvirkning?",
+    "expected_source": "fremtind_innbo_standard.pdf#p3"
   },
   {
     "type": "exclusion_edge",
-    "question": "Hvis jeg har klaget på et offentlig forvaltningsvedtak og tapt, og deretter går til søksmål, vil rettshjelpsforsikringen også dekke advokatutgiftene jeg hadde under selve klagebehandlingen?",
-    "expected_source": "fremtind_reise.pdf#p14"
+    "question": "Gjelder unntaket i teksten om at forsett eller grov uaktsomhet ikke gjelder dersom den forsikrede på grunn av alder eller sinnstilstand ikke kunne forstå rekkevidden av sin handling, også hvis den forsikrede var i en kortvarig akutt forvirring under selve ulykken og senere ble fullt bevisst igjen?",
+    "expected_source": "fremtind_bil_ansvar.pdf#p3"
   },
   {
     "type": "trap",

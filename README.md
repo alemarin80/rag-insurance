@@ -116,6 +116,45 @@ To run the pipeline:
    curl http://localhost:8000/health
    ```
 
+## Reset the data
+
+Use these commands when you add or change PDFs, change the chunk size or the embedding model, or want fresh eval results. Run them from the repository root with the virtual environment active.
+
+To rebuild the policy chunks, run the ingest again. It deletes every row in `chunks` first, so you can run it any time:
+
+```bash
+python -m src.ingestion.ingest
+```
+
+Confirm that the table has about one chunk per 1,000 characters of policy text:
+
+```bash
+docker exec insurance_rag_db psql -U rag -d insurance_rag -c "SELECT doc_name, count(*) FROM chunks GROUP BY doc_name ORDER BY 1;"
+```
+
+After you re-ingest, regenerate the eval questions. They come from random chunks, so old questions no longer match the new content. Delete the file, and the next `run_eval` writes a new `data/eval_set.json` with 18 questions (5 per question type and 3 unanswerable traps):
+
+```bash
+rm data/eval_set.json
+python -m src.evals.run_eval
+```
+
+To clear logged results without touching the policy chunks, truncate the log tables. This deletes every eval run and every feedback row, real and simulated:
+
+```bash
+docker exec insurance_rag_db psql -U rag -d insurance_rag -c "TRUNCATE eval_logs, user_feedback RESTART IDENTITY;"
+```
+
+To start over completely, delete the database volume. This removes `chunks`, `eval_logs`, and `user_feedback`. Then run the Quickstart from step 1 again:
+
+```bash
+docker compose down -v
+docker compose up -d
+python -m src.ingestion.ingest
+```
+
+If you change `EMBED_MODEL` or `EMBED_DIM` in `src/llm.py`, run `docker compose down -v` instead of the plain ingest, because the `chunks` table keeps its old vector size.
+
 ## Test your setup
 
 Run the unit tests. They don't call any LLM API:
@@ -132,17 +171,17 @@ python -m tests.smoke_llm --e2e
 
 ## Benchmark results
 
-The following table compares retrieval modes on 18 Norwegian queries: 15 generated from the policies and 3 unanswerable trap questions. These numbers come from an earlier run with Gemini as both generator and judge. <!-- TODO(verify): rerun `python -m src.evals.run_eval` with the current .env and replace this table. -->
+The following table compares retrieval modes on 18 Norwegian questions: 15 written from the policy chunks and 3 unanswerable trap questions. The corpus is 5 policy PDFs, split into 209 chunks. `gpt-5-mini` generated the answers, `gemini-4-hydrogen` judged them, and `gpt-5-nano` wrote the questions.
 
-| Mode | Thinking level | Recall@5 | Faithfulness | Relevance | Average latency |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| `vector` (baseline) | default | 1.00 | 1.00 | 1.00 | 11,882 ms |
-| `vector` | `low` | 1.00 | 1.00 | 1.00 | 3,180 ms |
-| `hybrid` (RRF) | `low` | 1.00 | 1.00 | 1.00 | 4,138 ms |
+| Mode | Recall@5 | Faithfulness | Relevance | Average latency |
+| :--- | :---: | :---: | :---: | :---: |
+| `vector` | 0.80 | 0.99 | 0.98 | 15,988 ms |
+| `hybrid` (RRF) | 0.80 | 0.97 | 0.96 | 13,678 ms |
 
-Setting `thinking_level="low"` on Gemini cut average latency by about 73% (11.9 s to 3.2 s) with no drop in faithfulness or refusal accuracy. This setting applies to Gemini only.
+One question changes a score by about 0.05, so the two modes don't differ in any way this set can measure. Run `python -m src.evals.run_eval` to reproduce the table with your own `.env` settings. Results vary between runs, because the model that writes the questions samples at a temperature above zero.
 
 ## Limitations
 
-- All three modes score 1.00, so the eval set can't yet separate them. A harder set with multi-policy and table-heavy questions would show a difference.
-- The retrieval step has no reranker.
+- The eval set is small (18 questions). A larger set with multi-policy and table-heavy questions would separate `vector` from `hybrid`.
+- Recall@5 is 0.80, which means some answers sit outside the top 5 chunks. Possible fixes are a larger `top_k` or a reranker, and the pipeline has neither.
+- `gpt-5-mini` takes 14 to 16 seconds per answer here. Gemini with `thinking_level="low"` answered in 3 to 4 seconds in earlier runs on a smaller, partly ingested corpus, so treat that comparison as unverified.

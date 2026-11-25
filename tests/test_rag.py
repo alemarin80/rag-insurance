@@ -37,3 +37,24 @@ def test_rag_answer_schema_with_citation():
 def test_feedback_validation_rejects_bad_rating():
     res = client.post("/feedback", json={"question": "q", "answer": "a", "rating": 5})
     assert res.status_code == 422
+
+def test_embed_batch_returns_one_vector_per_text(monkeypatch):
+    """Regression: a merged embedding once made ingest keep 1 of every 50 chunks."""
+    from types import SimpleNamespace
+    import pytest
+    from src.ingestion import ingest
+
+    class FakeModels:
+        def __init__(self, n):
+            self.n = n
+
+        def embed_content(self, model, contents, config):
+            assert all(hasattr(c, "parts") for c in contents)  # one Content per text
+            return SimpleNamespace(embeddings=[SimpleNamespace(values=[0.0]) for _ in range(self.n)])
+
+    monkeypatch.setattr(ingest, "client", SimpleNamespace(models=FakeModels(3)))
+    assert len(ingest.embed_batch(["a", "b", "c"])) == 3
+
+    monkeypatch.setattr(ingest, "client", SimpleNamespace(models=FakeModels(1)))
+    with pytest.raises(AssertionError):
+        ingest.embed_batch(["a", "b", "c"])
