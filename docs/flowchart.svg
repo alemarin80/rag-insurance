@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 510" width="1260" height="510" font-family="Helvetica, Arial, sans-serif" font-size="14" role="img" aria-labelledby="t d">
+  <title id="t">Insurance RAG system flow</title>
+  <desc id="d">Top row: policy PDFs are ingested into Postgres, which the ask() pipeline searches (retrieve, then generate). Middle row, in blue: the simulation and evaluation scripts. The question simulator samples chunks from Postgres and sends eval questions to retrieve; the user simulator sends conversation turns to retrieve and writes simulated ratings to user_feedback; the LLM judge scores each generated answer and writes to eval_logs. Bottom row, in orange: a real user or app talks to the FastAPI service, which calls ask(); thumbs up or down ratings go through /feedback to user_feedback with source real.</desc>
+  <defs>
+    <marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#c2410c"/>
+    </marker>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#333"/>
+    </marker>
+  <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#2563eb"/>
+    </marker>
+  </defs>
+  <rect width="1260" height="510" fill="#fff"/>
+
+  <!-- real pipeline row -->
+  <text x="20" y="28" font-weight="bold" fill="#333">Pipeline</text>
+  <rect x="20" y="62" width="130" height="56" rx="4" fill="#ececf8" stroke="#8b7fd6"/>
+  <text x="85" y="95" text-anchor="middle" fill="#0f172a">Policy PDFs</text>
+
+  <rect x="210" y="52" width="250" height="76" rx="4" fill="#ececf8" stroke="#8b7fd6"/>
+  <text x="335" y="82" text-anchor="middle" fill="#0f172a">Postgres</text>
+  <text x="335" y="102" text-anchor="middle" fill="#0f172a" font-size="12">pgvector HNSW + Norwegian tsvector GIN</text>
+
+  <rect x="540" y="30" width="700" height="120" rx="6" fill="#f1f1f5" stroke="#6b6b8a"/>
+  <text x="560" y="52" font-weight="bold" fill="#333">ask()</text>
+  <rect x="560" y="62" width="240" height="56" rx="4" fill="#ececf8" stroke="#8b7fd6"/>
+  <text x="680" y="86" text-anchor="middle" fill="#0f172a">1. Retrieve</text>
+  <text x="680" y="105" text-anchor="middle" fill="#0f172a" font-size="12">hybrid RRF, top-5 chunks</text>
+  <rect x="940" y="62" width="280" height="56" rx="4" fill="#ececf8" stroke="#8b7fd6"/>
+  <text x="1080" y="86" text-anchor="middle" fill="#0f172a">2. Generate</text>
+  <text x="1080" y="105" text-anchor="middle" fill="#0f172a" font-size="12">LLM answer + citations</text>
+
+  <g stroke="#333" stroke-width="1.5" fill="none">
+    <path d="M150 90H208" marker-end="url(#a)"/>
+    <path d="M462 90H538" marker-start="url(#a)" marker-end="url(#a)"/>
+    <path d="M800 90H938" marker-end="url(#a)"/>
+  </g>
+  <g fill="#333" font-size="12" text-anchor="middle">
+    <text x="180" y="80">ingest</text>
+    <text x="500" y="80">search</text>
+    <text x="869" y="80">chunks</text>
+  </g>
+
+  <!-- simulation row -->
+  <text x="20" y="316" font-weight="bold" fill="#1d4ed8">Simulation and</text><text x="20" y="334" font-weight="bold" fill="#1d4ed8">evaluation (blue)</text>
+  <rect x="210" y="290" width="210" height="56" rx="4" fill="#bfdbfe" stroke="#2563eb"/>
+  <text x="315" y="314" text-anchor="middle" fill="#0f172a">Question simulator</text>
+  <text x="315" y="333" text-anchor="middle" fill="#0f172a" font-size="12">run_eval</text>
+
+  <rect x="460" y="290" width="200" height="56" rx="4" fill="#bfdbfe" stroke="#2563eb"/>
+  <text x="560" y="314" text-anchor="middle" fill="#0f172a">User simulator</text>
+  <text x="560" y="333" text-anchor="middle" fill="#0f172a" font-size="12">simulate_users</text>
+
+  <rect x="740" y="290" width="200" height="56" rx="4" fill="#bfdbfe" stroke="#2563eb"/>
+  <text x="840" y="314" text-anchor="middle" fill="#0f172a">user_feedback</text>
+  <text x="840" y="333" text-anchor="middle" fill="#0f172a" font-size="12">source: simulated</text>
+
+  <rect x="980" y="290" width="110" height="56" rx="4" fill="#bfdbfe" stroke="#2563eb"/>
+  <text x="1035" y="323" text-anchor="middle" fill="#0f172a">LLM judge</text>
+
+  <rect x="1130" y="290" width="110" height="56" rx="4" fill="#bfdbfe" stroke="#2563eb"/>
+  <text x="1185" y="323" text-anchor="middle" fill="#0f172a">eval_logs</text>
+
+  <g stroke="#2563eb" stroke-width="1.5" fill="none">
+    <!-- Postgres -> question simulator: sample chunks -->
+    <path d="M300 128V288" marker-end="url(#b)"/>
+    <!-- question simulator -> retrieve: eval question -->
+    <path d="M390 290V230H620V120" marker-end="url(#b)"/>
+    <!-- user simulator -> retrieve: conversation turns -->
+    <path d="M530 290V250H700V120" marker-end="url(#b)"/>
+    <!-- user simulator -> user_feedback -->
+    <path d="M660 318H738" marker-end="url(#b)"/>
+    <!-- generate -> judge: answer -->
+    <path d="M1035 120V290" marker-end="url(#b)"/>
+    <!-- judge -> eval_logs -->
+    <path d="M1090 318H1128" marker-end="url(#b)"/>
+  </g>
+  <g fill="#1d4ed8" font-size="12">
+    <text x="308" y="190">sample chunks</text>
+    <text x="505" y="222" text-anchor="middle">eval question</text>
+    <text x="615" y="268" text-anchor="middle">conversation turns</text>
+    <text x="699" y="308" text-anchor="middle">simulated</text>
+    <text x="699" y="334" text-anchor="middle">ratings</text>
+    <text x="1043" y="210">answer</text>
+  </g>
+
+  <!-- real use row -->
+  <text x="20" y="456" font-weight="bold" fill="#c2410c">Real use (orange)</text>
+  <rect x="620" y="420" width="180" height="56" rx="4" fill="#fed7aa" stroke="#ea580c"/>
+  <text x="710" y="444" text-anchor="middle" fill="#0f172a">user_feedback</text>
+  <text x="710" y="463" text-anchor="middle" fill="#0f172a" font-size="12">source: real</text>
+
+  <rect x="860" y="420" width="200" height="56" rx="4" fill="#fed7aa" stroke="#ea580c"/>
+  <text x="960" y="444" text-anchor="middle" fill="#0f172a">FastAPI</text>
+  <text x="960" y="463" text-anchor="middle" fill="#0f172a" font-size="12">/health, /ask, /feedback</text>
+
+  <rect x="1140" y="420" width="100" height="56" rx="4" fill="#fed7aa" stroke="#ea580c"/>
+  <text x="1190" y="444" text-anchor="middle" fill="#0f172a">Real user</text>
+  <text x="1190" y="463" text-anchor="middle" fill="#0f172a" font-size="12">or app</text>
+
+  <g stroke="#c2410c" stroke-width="1.5" fill="none">
+    <!-- FastAPI <-> ask() -->
+    <path d="M960 418V152" marker-start="url(#o)" marker-end="url(#o)"/>
+    <!-- FastAPI -> user_feedback -->
+    <path d="M858 448H802" marker-end="url(#o)"/>
+    <!-- real user <-> FastAPI -->
+    <path d="M1062 448H1138" marker-start="url(#o)" marker-end="url(#o)"/>
+  </g>
+  <g fill="#c2410c" font-size="12">
+    <text x="970" y="390">question</text>
+    <text x="970" y="406">answer</text>
+    <text x="830" y="441" text-anchor="middle">thumbs</text>
+    <text x="830" y="464" text-anchor="middle">up/down</text>
+    <text x="1100" y="441" text-anchor="middle">question</text>
+    <text x="1100" y="464" text-anchor="middle">answer</text>
+  </g>
+</svg>

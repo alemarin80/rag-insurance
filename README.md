@@ -13,24 +13,9 @@ The pipeline has four parts:
 - **Automated evaluation** (`src/evals/run_eval.py`): A user simulator generates a fixed Norwegian question set in `data/eval_set.json`. The set covers exact clause lookups, informal customer scenarios, exclusion edge cases, and unanswerable trap questions. An LLM judge scores faithfulness and relevance, and every run is logged to the `eval_logs` table.
 - **API and feedback** (`src/api/app.py`): A FastAPI service with `/health`, `/ask`, and `/feedback`. `/feedback` stores thumbs-up or thumbs-down ratings in the `user_feedback` table. The `source` column marks each row as `real` (from the API) or `simulated` (from `simulate_users`).
 
-```mermaid
-flowchart TB
-    PDF[Policy PDFs] -->|PyMuPDF + embeddings| DB[(Postgres: pgvector HNSW + Norwegian tsvector GIN)]
-    DB -->|sample chunks| QSIM["Question simulator (run_eval)"]
-    QSIM -->|eval question| RET
-    USIM["User simulator (simulate_users)"] -->|conversation turns| RET
-    USER[Real user or app] -->|question| API[FastAPI /ask]
-    API -->|question| RET
-    subgraph ASK["ask()"]
-        RET["1. Retrieve: hybrid RRF, top-5 chunks"] -->|chunks| GEN["2. Generate: LLM answer + citations"]
-    end
-    RET <-->|search| DB
-    GEN -->|answer| JUDGE[LLM judge]
-    JUDGE --> EVAL[(eval_logs)]
-    USER -->|real thumbs up/down| API
-    API -->|real ratings| FB[("user_feedback (source: real or simulated)")]
-    USIM -.->|simulated ratings| FB
-```
+![System flow. Top row: policy PDFs are ingested into Postgres, which the ask() pipeline searches to retrieve chunks and generate an answer. Blue row: simulation and evaluation scripts. Orange row: real use through the FastAPI service.](docs/flowchart.svg)
+
+The top row is the pipeline. The blue row is the simulation and evaluation scripts and the tables they write. The orange row is real use through the API. The two `user_feedback` boxes are one table: the `source` column tells simulated ratings from real ones.
 
 ## Choose providers and models
 
