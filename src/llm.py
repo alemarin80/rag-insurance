@@ -6,6 +6,8 @@ Select the provider and model with env vars (or function arguments):
     JUDGE_PROVIDER=...                     JUDGE_MODEL=...           # eval LLM judge
     SIM_PROVIDER=...                       SIM_MODEL=...             # eval question + user simulator
                                                                      # (all fall back to LLM_*)
+    LLM_EFFORT=minimal|low|medium|high|default   (also JUDGE_EFFORT, SIM_EFFORT)
+        Reasoning effort per role. Defaults: llm=low, sim=low, judge=default (provider default).
 
 API keys are read by each SDK: GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY,
 ANTHROPIC_API_KEY. Embeddings are NOT handled here and stay on Gemini.
@@ -46,6 +48,11 @@ DEFAULT_MODELS = {
 # the `chunks` table (db.py builds `vector(EMBED_DIM)` only when the table is new).
 EMBED_MODEL = "gemini-embedding-2-preview"
 EMBED_DIM = 768  # via Matryoshka truncation
+
+# Reasoning effort per role. Set LLM_EFFORT, JUDGE_EFFORT or SIM_EFFORT in .env to change it.
+# "default" means: send no effort setting and use the provider's own default.
+EFFORTS = ("minimal", "low", "medium", "high")
+DEFAULT_EFFORT = {"llm": "low", "sim": "low", "judge": "default"}
 
 _clients: dict = {}
 
@@ -109,7 +116,22 @@ def _client(provider: str):
     return _clients[provider]
 
 
-def generate_structured(
+def resolve_effort(role: str = "llm", effort: str | None = None) -> str | None:
+    """Return the reasoning effort for a role, or None to use the provider default."""
+    value = (effort or os.getenv(f"{role.upper()}_EFFORT") or DEFAULT_EFFORT[role]).lower()
+    if value == "default":
+        return None
+    if value not in EFFORTS:
+        raise ValueError(f"Unknown effort {value!r}. Use one of {list(EFFORTS)} or 'default'.")
+    return value
+
+
+def generate_structured(prompt: str, schema: type[T], **kwargs) -> T:
+    """Send prompt, return a validated instance of schema. See generate_structured_usage."""
+    return generate_structured_usage(prompt, schema, **kwargs)[0]
+
+
+def generate_structured_usage(
     prompt: str,
     schema: type[T],
     *,
@@ -117,13 +139,16 @@ def generate_structured(
     provider: str | None = None,
     model: str | None = None,
     temperature: float = 0.0,
-    fast: bool = False,
-) -> T:
-    """Send prompt, return a validated instance of schema.
+    effort: str | None = None,
+) -> tuple[T, int | None, int | None]:
+    """Send prompt, return (validated schema instance, input tokens, output tokens).
 
-    fast=True asks for low reasoning effort where the provider supports it (Gemini only).
+    effort sets the reasoning effort (see EFFORTS); None reads {ROLE}_EFFORT from the
+    environment. Gemini maps it to thinking_level and OpenAI reasoning models to
+    reasoning.effort. Anthropic and gpt-4* ignore it. Output tokens include reasoning tokens.
     """
     provider, model = resolve(role, provider, model)
+    effort = resolve_effort(role, effort)
     client = _client(provider)
 
     if provider == "gemini":
@@ -134,24 +159,29 @@ def generate_structured(
             response_mime_type="application/json",
             response_schema=schema,
         )
-        if fast:
-            cfg["thinking_config"] = types.ThinkingConfig(thinking_level="low")
+        if effort:
+            cfg["thinking_config"] = types.ThinkingConfig(thinking_level=effort)
         res = client.models.generate_content(
             model=model, contents=prompt, config=types.GenerateContentConfig(**cfg)
         )
-        return schema.model_validate_json(res.text)
+        u = res.usage_metadata
+        out = ((u.candidates_token_count or 0) + (u.thoughts_token_count or 0)) if u else None
+        return schema.model_validate_json(res.text), (u.prompt_token_count if u else None), out
 
     if provider == "openai":
         kwargs = {}
-        # Reasoning models (o-series, gpt-5*) reject temperature.
         if model.startswith("gpt-4"):
             kwargs["temperature"] = temperature
+        elif effort:
+            # Reasoning models (o-series, gpt-5*) reject temperature and accept an effort.
+            kwargs["reasoning"] = {"effort": effort}
         res = client.responses.parse(
             model=model, input=prompt, text_format=schema, **kwargs
         )
         if res.output_parsed is None:
             raise RuntimeError(f"OpenAI returned no parsed output (model={model}).")
-        return res.output_parsed
+        u = res.usage
+        return res.output_parsed, (u.input_tokens if u else None), (u.output_tokens if u else None)
 
     # anthropic: force a single tool call whose input schema is the Pydantic schema
     res = client.messages.create(
@@ -170,5 +200,10 @@ def generate_structured(
     )
     for block in res.content:
         if block.type == "tool_use":
-            return schema.model_validate(block.input)
+            u = res.usage
+            return (
+                schema.model_validate(block.input),
+                (u.input_tokens if u else None),
+                (u.output_tokens if u else None),
+            )
     raise RuntimeError(f"Anthropic returned no tool_use block (model={model}).")

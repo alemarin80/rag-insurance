@@ -34,10 +34,13 @@ The generator, the judge, and the simulator can each use Gemini, OpenAI, or Anth
 | `LLM_PROVIDER`, `LLM_MODEL` | Answer generation. If unset, the provider is `openai` and the model is the provider default in `src/llm.py`. |
 | `JUDGE_PROVIDER`, `JUDGE_MODEL` | LLM judge that scores answers. |
 | `SIM_PROVIDER`, `SIM_MODEL` | Simulator that writes the eval questions and plays the simulated users. |
+| `LLM_EFFORT`, `JUDGE_EFFORT`, `SIM_EFFORT` | Reasoning effort per role: `minimal`, `low`, `medium`, `high`, or `default` (the provider's own default). The defaults are `low` for the generator and the simulator and `default` for the judge. |
 
 If you leave a role's provider unset, it falls back to `LLM_PROVIDER`. The model falls back to `LLM_MODEL` only when the provider is the same, otherwise to the provider default in `src/llm.py`.
 
 The docstring of `src/llm.py` lists suggested models and marks which ones the smoke test has run. Use a judge from a different provider than the generator to avoid self-preference bias. `run_eval` and `simulate_users` refuse to start when any two of the three roles (generator, judge, simulator) use the same provider and model. To allow it on purpose, set `ALLOW_SAME_MODELS=1`. Embeddings always use Gemini, so a Gemini API key is required in every setup.
+
+The effort setting maps to `reasoning.effort` for OpenAI reasoning models (`gpt-5*`, `o*`) and to `thinking_level` for Gemini. Anthropic and `gpt-4*` models ignore it. A lower effort cuts latency and cost, and it can lower answer quality, so keep the judge at `default` unless you have measured the effect.
 
 ## Quickstart
 
@@ -150,7 +153,7 @@ If you change `EMBED_MODEL` or `EMBED_DIM` in `src/llm.py`, run `docker compose 
 
 ## Test your setup
 
-Run the unit tests. They don't call any LLM API, but the code creates a Gemini client when it loads, so `GEMINI_API_KEY` must be set. Any value works for the unit tests:
+Run the unit tests. They don't call any LLM API, but the code creates a Gemini client when it loads, so `GEMINI_API_KEY` must be set. Any value works for the unit tests. GitHub Actions runs the same command on every push (`.github/workflows/ci.yml`):
 
 ```bash
 GEMINI_API_KEY=dummy python -m pytest -v
@@ -168,7 +171,7 @@ The command `python -m src.evals.run_eval` runs three stages:
 
 1. **Generate questions.** If `data/eval_set.json` doesn't exist, a simulator LLM writes a question set and saves it there. Later runs reuse the file, so every run and every model you try answers the same questions.
 1. **Retrieve and answer.** For each question, the pipeline runs once per retrieval mode (`vector`, then `hybrid`). The mode only changes how `src/retrieval/search.py` picks the top 5 chunks. The generator LLM then answers from those chunks.
-1. **Judge.** A separate judge LLM scores each answer. It receives the question, the answer, the answer's `is_covered_in_context` flag, and the retrieved chunks. It doesn't receive the retrieval mode or the source page of the question. It does know whether the question is a trap. The script writes each result to `eval_logs`, with the mode and the generator and judge model names.
+1. **Judge.** A separate judge LLM scores each answer. It receives the question, the answer, the answer's `is_covered_in_context` flag, and the retrieved chunks. It doesn't receive the retrieval mode or the source page of the question. It does know whether the question is a trap. The script writes each result to `eval_logs`, with the mode, the generator and judge model names and effort, the retrieved pages, whether the expected page was among them, and the generator's token counts. Output tokens include reasoning tokens.
 
 ### Question generation
 
@@ -197,6 +200,14 @@ The run prints three scores per retrieval mode:
 - **Faithfulness** (judge, 0 to 1): 1 if no claim goes beyond the retrieved chunks. The judge has no faithfulness rule for the 3 trap questions, but their scores are still in the average over all 18 questions.
 - **Relevance** (judge, 0 to 1): 1 if the answer addresses the question. For a trap question, 1 only if the bot refused.
 
+### Find the retrieval misses
+
+`run_eval` prints each miss with the expected page and the pages it retrieved. The same data stays in `eval_logs`, so you can inspect a miss without a new run:
+
+```bash
+docker exec insurance_rag_db psql -U rag -d insurance_rag -c "SELECT question, expected_source, retrieved FROM eval_logs WHERE retrieval_hit = false ORDER BY id DESC;"
+```
+
 ### Known weaknesses
 
 The design has these limits:
@@ -220,7 +231,7 @@ The following table compares retrieval modes on 18 Norwegian questions: 15 writt
 
 One question changes Recall@5 by 0.07 (1 of 15) and the judge scores by about 0.06 (1 of 18), so the two modes don't differ in any way this set can measure. The identical Recall@5 may have a cause besides equal quality: the keyword side of `hybrid` requires every query term to match (see [Design choices](#design-choices)), so on full questions `hybrid` may behave like `vector`. This repository hasn't tested that.
 
-`gpt-5-mini` takes 14 to 16 seconds per answer here. Gemini with `thinking_level="low"` answered in 3 to 4 seconds in earlier runs on a smaller, partly ingested corpus, so treat that comparison as unverified.
+The table above used the default reasoning effort, where `gpt-5-mini` takes 14 to 16 seconds per answer. A new run of `vector` at `LLM_EFFORT=low` (now the default) gave Recall@5 0.80, faithfulness 1.00, relevance 0.99, an average latency of 7,542 ms, and about 1,700 input and 550 output generator tokens per answer. The `hybrid` re-run didn't finish: the Gemini judge returned a 429 error because the project hit its monthly spending cap. The three misses of that run are in `eval_logs`. Gemini with `thinking_level="low"` answered in 3 to 4 seconds in earlier runs on a smaller, partly ingested corpus, so treat that comparison as unverified.
 
 Run `python -m src.evals.run_eval` to reproduce the table with your own `.env` settings. The numbers change when you regenerate the questions, because the simulator's output varies.
 
@@ -232,3 +243,4 @@ To make the comparison meaningful, work in this order:
 2. Grow the eval set beyond 18 questions, with multi-policy and table-heavy questions.
 3. Hand-grade about 15 answers and compare them with the judge's scores.
 4. If Recall@5 stays at 0.80, try a larger `top_k` or add a reranker.
+5. Add a streaming endpoint. The answer is structured JSON (`answer`, `citations`, `is_covered_in_context`), so a half-written answer can't be shown as it arrives. One option is to send the retrieved sources first and the final JSON last. Real token streaming needs a prompt that writes the plain answer before the citations.

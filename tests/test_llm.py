@@ -56,3 +56,74 @@ def test_override_allows_same(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
     monkeypatch.setenv("ALLOW_SAME_MODELS", "1")
     check_roles_differ()
+
+
+# --- reasoning effort and token usage (fake clients, no API calls) ---
+
+from types import SimpleNamespace
+
+from pydantic import BaseModel
+
+from src import llm
+
+
+class Answer(BaseModel):
+    text: str
+
+
+def fake_openai(captured):
+    def parse(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            output_parsed=Answer(text="ok"),
+            usage=SimpleNamespace(input_tokens=11, output_tokens=7),
+        )
+
+    return SimpleNamespace(responses=SimpleNamespace(parse=parse))
+
+
+@pytest.fixture
+def openai_calls(monkeypatch):
+    captured = {}
+    monkeypatch.setitem(llm._clients, "openai", fake_openai(captured))
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    for k in ("LLM_EFFORT", "JUDGE_EFFORT", "SIM_EFFORT"):
+        monkeypatch.delenv(k, raising=False)
+    return captured
+
+
+def test_effort_defaults_and_env(monkeypatch):
+    monkeypatch.delenv("LLM_EFFORT", raising=False)
+    monkeypatch.delenv("JUDGE_EFFORT", raising=False)
+    assert llm.resolve_effort("llm") == "low"
+    assert llm.resolve_effort("judge") is None  # provider default
+    monkeypatch.setenv("JUDGE_EFFORT", "HIGH")
+    assert llm.resolve_effort("judge") == "high"
+    assert llm.resolve_effort("judge", "minimal") == "minimal"  # argument wins
+
+
+def test_effort_rejects_unknown_value(monkeypatch):
+    monkeypatch.setenv("LLM_EFFORT", "turbo")
+    with pytest.raises(ValueError, match="Unknown effort"):
+        llm.resolve_effort("llm")
+
+
+def test_openai_reasoning_model_gets_effort_and_usage(openai_calls):
+    out, tokens_in, tokens_out = llm.generate_structured_usage(
+        "hi", Answer, model="gpt-5-mini", effort="low"
+    )
+    assert out.text == "ok" and (tokens_in, tokens_out) == (11, 7)
+    assert openai_calls["reasoning"] == {"effort": "low"}
+    assert "temperature" not in openai_calls
+
+
+def test_openai_gpt4_gets_temperature_not_effort(openai_calls):
+    llm.generate_structured("hi", Answer, model="gpt-4o", effort="low", temperature=0.3)
+    assert openai_calls["temperature"] == 0.3
+    assert "reasoning" not in openai_calls
+
+
+def test_openai_default_effort_sends_no_reasoning(openai_calls, monkeypatch):
+    monkeypatch.setenv("JUDGE_EFFORT", "default")
+    llm.generate_structured("hi", Answer, role="judge", model="gpt-5-mini")
+    assert "reasoning" not in openai_calls

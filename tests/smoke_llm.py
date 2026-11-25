@@ -47,7 +47,7 @@ def probe(provider: str, model: str) -> tuple[str, str]:
         return "SKIP", f"no {KEYS[provider][0]}"
     t0 = time.perf_counter()
     try:
-        out = generate_structured(PROMPT, Probe, provider=provider, model=model, fast=True)
+        out = generate_structured(PROMPT, Probe, provider=provider, model=model)
     except Exception as e:  # report every failure, keep going
         return "FAIL", f"{type(e).__name__}: {str(e)[:120]}"
     ms = int((time.perf_counter() - t0) * 1000)

@@ -5,8 +5,9 @@ response with exact document/page citations, refusing when context is insufficie
 """
 
 import time
+from dataclasses import dataclass
 from pydantic import BaseModel, Field
-from src.llm import generate_structured
+from src.llm import generate_structured_usage
 from src.retrieval.search import search, RetrievedChunk
 
 
@@ -30,10 +31,19 @@ class RagAnswer(BaseModel):
     citations: list[Citation]
 
 
-def ask(
-    question: str, mode: str = "hybrid", top_k: int = 5
-) -> tuple[RagAnswer, list[RetrievedChunk], int]:
-    """Run retrieval + grounded generation, returning (answer, chunks, latency_ms)."""
+@dataclass
+class AskResult:
+    """One answered question with everything needed to log and debug it."""
+
+    answer: RagAnswer
+    chunks: list[RetrievedChunk]
+    latency_ms: int
+    input_tokens: int | None
+    output_tokens: int | None  # includes reasoning tokens
+
+
+def ask_detailed(question: str, mode: str = "hybrid", top_k: int = 5) -> AskResult:
+    """Run retrieval + grounded generation and return the answer, chunks, latency and token counts."""
     t0 = time.perf_counter()
     chunks = search(question, mode=mode, top_k=top_k)
     context = "\n\n".join(
@@ -49,10 +59,19 @@ Policy excerpts:
 
 Question: {question}"""
 
-    # fast=True: low thinking to speed up generation (Gemini only)
-    answer = generate_structured(prompt, RagAnswer, role="llm", temperature=0.0, fast=True)
+    answer, tokens_in, tokens_out = generate_structured_usage(
+        prompt, RagAnswer, role="llm", temperature=0.0
+    )
     latency_ms = int((time.perf_counter() - t0) * 1000)
-    return answer, chunks, latency_ms
+    return AskResult(answer, chunks, latency_ms, tokens_in, tokens_out)
+
+
+def ask(
+    question: str, mode: str = "hybrid", top_k: int = 5
+) -> tuple[RagAnswer, list[RetrievedChunk], int]:
+    """Run retrieval + grounded generation, returning (answer, chunks, latency_ms)."""
+    r = ask_detailed(question, mode=mode, top_k=top_k)
+    return r.answer, r.chunks, r.latency_ms
 
 
 if __name__ == "__main__":

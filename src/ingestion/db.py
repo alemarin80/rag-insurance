@@ -8,7 +8,7 @@ Initializes the `pgvector` extension and creates three tables:
       IDs containing it for fast exact/keyword matching.
     - HNSW (Hierarchical Navigable Small World): Graph-based approximate nearest
       neighbor index for fast semantic similarity search over vector embeddings.
-- `eval_logs`: Stores evaluation runs, citations, latency, and LLM-judge scores.
+- `eval_logs`: Stores evaluation runs: citations, retrieved pages, latency, token counts, and LLM-judge scores.
 - `user_feedback`: Stores thumbs-up/down ratings; `source` is `real` (API) or `simulated`.
 """
 
@@ -64,7 +64,13 @@ def init_schema():
             rating INT NOT NULL CHECK (rating IN (-1, 1)),
             comment TEXT
         );
-        -- Added later, so older databases get it through ALTER (existing rows count as real).
+        -- Added later, so older databases get these through ALTER.
+        ALTER TABLE eval_logs
+            ADD COLUMN IF NOT EXISTS retrieved JSONB,
+            ADD COLUMN IF NOT EXISTS retrieval_hit BOOLEAN,
+            ADD COLUMN IF NOT EXISTS input_tokens INT,
+            ADD COLUMN IF NOT EXISTS output_tokens INT;
+        -- Existing user_feedback rows count as real.
         ALTER TABLE user_feedback
             ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'real'
             CHECK (source IN ('real', 'simulated'));

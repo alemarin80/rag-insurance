@@ -42,7 +42,7 @@ def simulate_conversation(persona_name: str, persona_prompt: str, turns: int = 2
     # Turn 1: initial question
     q = generate_structured(
         f"{persona_prompt}\nStill ditt første korte spørsmål på norsk til forsikringsboten.",
-        UserTurn, role="sim", temperature=0.8, fast=True,
+        UserTurn, role="sim", temperature=0.8,
     ).message
 
     for t in range(turns):
@@ -54,7 +54,7 @@ def simulate_conversation(persona_name: str, persona_prompt: str, turns: int = 2
             transcript = "\n".join(f"Bruker: {u}\nBot: {b}" for u, b in history)
             q = generate_structured(
                 f"{persona_prompt}\nSamtale hittil:\n{transcript}\nStill ett kort oppfølgingsspørsmål på norsk.",
-                UserTurn, role="sim", temperature=0.8, fast=True,
+                UserTurn, role="sim", temperature=0.8,
             ).message
             time.sleep(1.0)
 
@@ -63,7 +63,7 @@ def simulate_conversation(persona_name: str, persona_prompt: str, turns: int = 2
     fb = generate_structured(
         f"{persona_prompt}\nVurder hele samtalen:\n{transcript}\n"
         "Gi rating=1 hvis boten var ærlig (inkl. å si nei når den ikke vet) og nyttig, ellers -1.",
-        UserFeedback, role="sim", temperature=0.0, fast=True,
+        UserFeedback, role="sim", temperature=0.0,
     )
     rating = 1 if fb.rating >= 0 else -1
 
