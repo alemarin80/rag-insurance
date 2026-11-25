@@ -9,14 +9,12 @@ Usage:
 """
 
 import time
-from google import genai
-from google.genai import types
 from pydantic import BaseModel, Field
 from src.ingestion.db import get_conn
 from src.generation.rag import ask
+from src.llm import generate_structured
 
-client = genai.Client()
-SIM_MODEL = "gemini-4-hydrogen"
+# The simulated user runs on the judge model (JUDGE_PROVIDER / JUDGE_MODEL in .env).
 
 PERSONAS = [
     ("stressed_driver", "Du er en stresset bileier som nettopp har hatt et lite uhell, og er usikker på egenandel og hvem som dekkes."),
@@ -42,17 +40,10 @@ def simulate_conversation(persona_name: str, persona_prompt: str, turns: int = 2
     """Run a multi-turn simulated user session and save feedback to Postgres."""
     history = []
     # Turn 1: initial question
-    init_res = client.models.generate_content(
-        model=SIM_MODEL,
-        contents=f"{persona_prompt}\nStill ditt første korte spørsmål på norsk til forsikringsboten.",
-        config=types.GenerateContentConfig(
-            temperature=0.8,
-            thinking_config=types.ThinkingConfig(thinking_level="low"),
-            response_mime_type="application/json",
-            response_schema=UserTurn,
-        ),
-    )
-    q = UserTurn.model_validate_json(init_res.text).message
+    q = generate_structured(
+        f"{persona_prompt}\nStill ditt første korte spørsmål på norsk til forsikringsboten.",
+        UserTurn, role="judge", temperature=0.8, fast=True,
+    ).message
 
     for t in range(turns):
         ans, _, ms = ask(q, mode="hybrid", top_k=5)
@@ -61,35 +52,19 @@ def simulate_conversation(persona_name: str, persona_prompt: str, turns: int = 2
 
         if t < turns - 1:
             transcript = "\n".join(f"Bruker: {u}\nBot: {b}" for u, b in history)
-            follow_res = client.models.generate_content(
-                model=SIM_MODEL,
-                contents=f"{persona_prompt}\nSamtale hittil:\n{transcript}\nStill ett kort oppfølgingsspørsmål på norsk.",
-                config=types.GenerateContentConfig(
-                    temperature=0.8,
-                    thinking_config=types.ThinkingConfig(thinking_level="low"),
-                    response_mime_type="application/json",
-                    response_schema=UserTurn,
-                ),
-            )
-            q = UserTurn.model_validate_json(follow_res.text).message
+            q = generate_structured(
+                f"{persona_prompt}\nSamtale hittil:\n{transcript}\nStill ett kort oppfølgingsspørsmål på norsk.",
+                UserTurn, role="judge", temperature=0.8, fast=True,
+            ).message
             time.sleep(1.0)
 
     # Simulated user leaves thumbs-up/down feedback
     transcript = "\n".join(f"Bruker: {u}\nBot: {b}" for u, b in history)
-    fb_res = client.models.generate_content(
-        model=SIM_MODEL,
-        contents=(
-            f"{persona_prompt}\nVurder hele samtalen:\n{transcript}\n"
-            "Gi rating=1 hvis boten var ærlig (inkl. å si nei når den ikke vet) og nyttig, ellers -1."
-        ),
-        config=types.GenerateContentConfig(
-            temperature=0.0,
-            thinking_config=types.ThinkingConfig(thinking_level="low"),
-            response_mime_type="application/json",
-            response_schema=UserFeedback,
-        ),
+    fb = generate_structured(
+        f"{persona_prompt}\nVurder hele samtalen:\n{transcript}\n"
+        "Gi rating=1 hvis boten var ærlig (inkl. å si nei når den ikke vet) og nyttig, ellers -1.",
+        UserFeedback, role="judge", temperature=0.0, fast=True,
     )
-    fb = UserFeedback.model_validate_json(fb_res.text)
     rating = 1 if fb.rating >= 0 else -1
 
     with get_conn() as conn:
