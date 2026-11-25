@@ -1,8 +1,8 @@
 """Ingests insurance policy PDFs into Postgres with pgvector embeddings.
 
 Reads all `.pdf` files from `data/policies/`, extracts text page-by-page using
-PyMuPDF, splits text into overlapping character chunks, generates 768-dim
-`RETRIEVAL_DOCUMENT` embeddings via the Gemini API, and stores chunks, page
+PyMuPDF, splits text into overlapping character chunks, generates
+`RETRIEVAL_DOCUMENT` embeddings (EMBED_DIM dims) via the Gemini API, and stores chunks, page
 metadata, and embeddings in the `chunks` table (with a generated Norwegian
 `tsvector` column for hybrid search).
 
@@ -15,9 +15,9 @@ import fitz  # PyMuPDF
 from google import genai
 from google.genai import types
 from src.ingestion.db import get_conn, init_schema
+from src.llm import EMBED_MODEL, EMBED_DIM
 
 client = genai.Client()
-EMBED_MODEL = "gemini-embedding-2-preview"  # 768 dims via MRL
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 200
 
@@ -38,7 +38,7 @@ def embed_batch(texts: list[str]) -> list[list[float]]:
         contents=texts,
         config=types.EmbedContentConfig(
             task_type="RETRIEVAL_DOCUMENT",
-            output_dimensionality=768,
+            output_dimensionality=EMBED_DIM,
         ),
     )
     return [e.values for e in res.embeddings]

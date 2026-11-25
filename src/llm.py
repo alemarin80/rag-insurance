@@ -8,8 +8,24 @@ Select the provider and model with env vars (or function arguments):
 
 API keys are read by each SDK: GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY,
 ANTHROPIC_API_KEY. Embeddings are NOT handled here and stay on Gemini.
-"""
 
+# Dictionary with suggested models:
+SUGGESTED_MODELS = {
+    "gemini": [
+        "gemini-4-hydrogen",  # tested; used for generation and judging so far
+    ],
+    "openai": [
+        "gpt-5-nano",  # tested; cheapest and fastest
+        "gpt-5-mini",  # tested; good default for generation
+        "gpt-5.5",  # untested; DEFAULT_MODELS value
+    ],
+    "anthropic": [
+        "claude-haiku-5-5",  # untested; cheap and fast
+        "claude-sonnet-5-5",  # untested; DEFAULT_MODELS value, good judge
+        "claude-opus-5-5",  # untested; strongest, most expensive
+    ],
+}
+"""
 import os
 from typing import TypeVar
 
@@ -17,12 +33,18 @@ from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
-DEFAULT_PROVIDER = "gemini"
+DEFAULT_PROVIDER = "openai"
 DEFAULT_MODELS = {
+    "anthropic": "claude-sonnet-5-5",
     "gemini": "gemini-4-hydrogen",
     "openai": "gpt-5.5",
-    "anthropic": "claude-sonnet-5-5",
 }
+
+# Embeddings: one source of truth, used by ingest.py and search.py (Gemini only).
+# Changing the model or EMBED_DIM requires re-ingesting all chunks, and recreating
+# the `chunks` table (db.py builds `vector(EMBED_DIM)` only when the table is new).
+EMBED_MODEL = "gemini-embedding-2-preview"
+EMBED_DIM = 768  # via Matryoshka truncation
 
 _clients: dict = {}
 

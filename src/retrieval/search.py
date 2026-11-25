@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from google import genai
 from google.genai import types
 from src.ingestion.db import get_conn
+from src.llm import EMBED_MODEL, EMBED_DIM
 
 client = genai.Client()
-EMBED_MODEL = "gemini-embedding-2-preview"  # use same model as ingest.py
 
 
 @dataclass
@@ -26,13 +26,13 @@ class RetrievedChunk:
 
 
 def embed_query(query: str) -> list[float]:
-    """Generate a 768-dim RETRIEVAL_QUERY embedding for a user question."""
+    """Generate an EMBED_DIM-dim RETRIEVAL_QUERY embedding for a user question."""
     res = client.models.embed_content(
         model=EMBED_MODEL,
         contents=query,
         config=types.EmbedContentConfig(
             task_type="RETRIEVAL_QUERY",
-            output_dimensionality=768,
+            output_dimensionality=EMBED_DIM,
         ),
     )
     return res.embeddings[0].values

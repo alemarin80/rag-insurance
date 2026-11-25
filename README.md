@@ -37,7 +37,7 @@ flowchart LR
 ## Quickstart
 ```bash
 docker compose up -d
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 # Add GEMINI_API_KEY and DATABASE_URL to .env, and drop PDFs in data/policies/
 python -m src.ingestion.ingest

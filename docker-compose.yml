@@ -1,3 +1,6 @@
+# Pinned so renaming the project folder keeps the existing pgdata volume.
+name: insurance-rag-eval
+
 services:
   db:
     image: pgvector/pgvector:pg16

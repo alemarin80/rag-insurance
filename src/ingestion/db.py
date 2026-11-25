@@ -1,7 +1,7 @@
 """PostgreSQL connection and schema setup for the insurance RAG pipeline.
 
 Initializes the `pgvector` extension and creates two tables:
-- `chunks`: Stores policy text, metadata, a 768-dim vector embedding, and a
+- `chunks`: Stores policy text, metadata, a vector embedding (EMBED_DIM dims), and a
   generated Norwegian `tsvector` (stemmed keywords). Uses two indexes for
   hybrid search (keyword search + semantic search + their ranking):
     - GIN (Generalized Inverted Index): Maps each Norwegian word to the chunk
@@ -15,6 +15,7 @@ import os
 import psycopg
 from dotenv import load_dotenv
 from pgvector.psycopg import register_vector
+from src.llm import EMBED_DIM
 
 load_dotenv()
 
@@ -26,7 +27,7 @@ def get_conn():
 
 def init_schema():
     with get_conn() as conn:
-        conn.execute("""
+        conn.execute(f"""
         CREATE TABLE IF NOT EXISTS chunks (
             id SERIAL PRIMARY KEY,
             doc_name TEXT NOT NULL,
@@ -34,7 +35,7 @@ def init_schema():
             chunk_index INT NOT NULL,
             content TEXT NOT NULL,
             content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('norwegian', content)) STORED,
-            embedding vector(768) NOT NULL
+            embedding vector({EMBED_DIM}) NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS idx_chunks_tsv ON chunks USING GIN (content_tsv);
