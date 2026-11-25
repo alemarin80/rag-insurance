@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 import time
 from src.ingestion.db import get_conn
 from src.generation.rag import ask
-from src.llm import generate_structured
+from src.llm import generate_structured, check_roles_differ, resolve
 
 
 class SimulatedQuery(BaseModel):
@@ -60,7 +60,7 @@ def generate_eval_set(n_per_type: int = 5, force_regen: bool = False) -> list[di
                     f"Write ONE question in Norwegian.\n\nExcerpt:\n{content}"
                 )
                 q = generate_structured(
-                    prompt, SimulatedQuery, role="judge", temperature=0.7, fast=True
+                    prompt, SimulatedQuery, role="sim", temperature=0.7, fast=True
                 ).question
                 eval_set.append({
                     "type": style_name,
@@ -98,8 +98,12 @@ def judge_answer(question: str, expected_source: str, answer_text: str, is_cover
 
 def run_benchmark(modes: tuple[str, ...] = ("vector", "hybrid")) -> None:
     """Run eval_set across retrieval modes, log to Postgres, and print summary."""
+    check_roles_differ()  # fail before spending any API credit
     eval_set = generate_eval_set(n_per_type=5)
-    print(f"Running {len(eval_set)} eval questions.\n")
+    gen = "/".join(resolve("llm"))
+    judge = "/".join(resolve("judge"))
+    sim = "/".join(resolve("sim"))
+    print(f"Running {len(eval_set)} eval questions. Generator: {gen} | Judge: {judge} | Simulator: {sim}\n")
 
     for mode in modes:
         recalls, faiths, rels, latencies = [], [], [], []
@@ -124,7 +128,7 @@ def run_benchmark(modes: tuple[str, ...] = ("vector", "hybrid")) -> None:
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
                     """,
                     (
-                        mode, q, exp, ans.answer,
+                        f"{mode} | gen={gen} | judge={judge}", q, exp, ans.answer,
                         json.dumps([c.model_dump() for c in ans.citations]),
                         score.faithfulness_score, score.relevance_score, score.reason, ms,
                     ),

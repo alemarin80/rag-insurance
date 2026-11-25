@@ -2,7 +2,7 @@
 
 Simulates Norwegian policyholder personas having 2-turn conversations with the
 RAG system (including follow-ups and pushback), then logs simulated user
-satisfaction ratings (+1/-1) and comments into the `user_feedback` table.
+satisfaction ratings (+1/-1) and comments into the `user_feedback` table with source='simulated'.
 
 Usage:
     python -m src.evals.simulate_users
@@ -10,11 +10,11 @@ Usage:
 
 import time
 from pydantic import BaseModel, Field
-from src.ingestion.db import get_conn
+from src.ingestion.db import get_conn, init_schema
 from src.generation.rag import ask
-from src.llm import generate_structured
+from src.llm import generate_structured, check_roles_differ
 
-# The simulated user runs on the judge model (JUDGE_PROVIDER / JUDGE_MODEL in .env).
+# The simulated user runs on the simulator model (SIM_PROVIDER / SIM_MODEL in .env).
 
 PERSONAS = [
     ("stressed_driver", "Du er en stresset bileier som nettopp har hatt et lite uhell, og er usikker på egenandel og hvem som dekkes."),
@@ -42,7 +42,7 @@ def simulate_conversation(persona_name: str, persona_prompt: str, turns: int = 2
     # Turn 1: initial question
     q = generate_structured(
         f"{persona_prompt}\nStill ditt første korte spørsmål på norsk til forsikringsboten.",
-        UserTurn, role="judge", temperature=0.8, fast=True,
+        UserTurn, role="sim", temperature=0.8, fast=True,
     ).message
 
     for t in range(turns):
@@ -54,7 +54,7 @@ def simulate_conversation(persona_name: str, persona_prompt: str, turns: int = 2
             transcript = "\n".join(f"Bruker: {u}\nBot: {b}" for u, b in history)
             q = generate_structured(
                 f"{persona_prompt}\nSamtale hittil:\n{transcript}\nStill ett kort oppfølgingsspørsmål på norsk.",
-                UserTurn, role="judge", temperature=0.8, fast=True,
+                UserTurn, role="sim", temperature=0.8, fast=True,
             ).message
             time.sleep(1.0)
 
@@ -63,18 +63,20 @@ def simulate_conversation(persona_name: str, persona_prompt: str, turns: int = 2
     fb = generate_structured(
         f"{persona_prompt}\nVurder hele samtalen:\n{transcript}\n"
         "Gi rating=1 hvis boten var ærlig (inkl. å si nei når den ikke vet) og nyttig, ellers -1.",
-        UserFeedback, role="judge", temperature=0.0, fast=True,
+        UserFeedback, role="sim", temperature=0.0, fast=True,
     )
     rating = 1 if fb.rating >= 0 else -1
 
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO user_feedback (question, answer, rating, comment) VALUES (%s, %s, %s, %s);",
+            "INSERT INTO user_feedback (question, answer, rating, comment, source) VALUES (%s, %s, %s, %s, 'simulated');",
             (history[-1][0], history[-1][1], rating, f"[{persona_name}] {fb.comment}"),
         )
     print(f"-> Logged feedback: {rating} | {fb.comment}\n" + "-" * 50)
 
 
 if __name__ == "__main__":
+    check_roles_differ()
+    init_schema()  # creates user_feedback on a fresh database
     for name, prompt in PERSONAS:
         simulate_conversation(name, prompt, turns=2)

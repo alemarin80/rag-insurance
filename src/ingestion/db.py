@@ -1,6 +1,6 @@
 """PostgreSQL connection and schema setup for the insurance RAG pipeline.
 
-Initializes the `pgvector` extension and creates two tables:
+Initializes the `pgvector` extension and creates three tables:
 - `chunks`: Stores policy text, metadata, a vector embedding (EMBED_DIM dims), and a
   generated Norwegian `tsvector` (stemmed keywords). Uses two indexes for
   hybrid search (keyword search + semantic search + their ranking):
@@ -9,6 +9,7 @@ Initializes the `pgvector` extension and creates two tables:
     - HNSW (Hierarchical Navigable Small World): Graph-based approximate nearest
       neighbor index for fast semantic similarity search over vector embeddings.
 - `eval_logs`: Stores evaluation runs, citations, latency, and LLM-judge scores.
+- `user_feedback`: Stores thumbs-up/down ratings; `source` is `real` (API) or `simulated`.
 """
 
 import os
@@ -54,6 +55,19 @@ def init_schema():
             judge_reason TEXT,
             latency_ms INT
         );
+
+        CREATE TABLE IF NOT EXISTS user_feedback (
+            id SERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            rating INT NOT NULL CHECK (rating IN (-1, 1)),
+            comment TEXT
+        );
+        -- Added later, so older databases get it through ALTER (existing rows count as real).
+        ALTER TABLE user_feedback
+            ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'real'
+            CHECK (source IN ('real', 'simulated'));
         """)
     print("Schema initialized.")
 

@@ -3,8 +3,9 @@
 Select the provider and model with env vars (or function arguments):
 
     LLM_PROVIDER=gemini|openai|anthropic   LLM_MODEL=<model id>      # answer generation
-    JUDGE_PROVIDER=...                     JUDGE_MODEL=...           # eval simulator + judge
-                                                                     # (fall back to LLM_*)
+    JUDGE_PROVIDER=...                     JUDGE_MODEL=...           # eval LLM judge
+    SIM_PROVIDER=...                       SIM_MODEL=...             # eval question + user simulator
+                                                                     # (all fall back to LLM_*)
 
 API keys are read by each SDK: GEMINI_API_KEY (or GOOGLE_API_KEY), OPENAI_API_KEY,
 ANTHROPIC_API_KEY. Embeddings are NOT handled here and stay on Gemini.
@@ -50,7 +51,7 @@ _clients: dict = {}
 
 
 def resolve(role: str = "llm", provider: str | None = None, model: str | None = None) -> tuple[str, str]:
-    """Return (provider, model). role is 'llm' (generation) or 'judge' (evals)."""
+    """Return (provider, model). role is 'llm' (generation), 'judge' or 'sim' (evals)."""
     prefix = role.upper()
     provider = (
         provider
@@ -65,6 +66,29 @@ def resolve(role: str = "llm", provider: str | None = None, model: str | None = 
     if not env_model and provider == (os.getenv("LLM_PROVIDER") or DEFAULT_PROVIDER).lower():
         env_model = os.getenv("LLM_MODEL")
     return provider, model or env_model or DEFAULT_MODELS[provider]
+
+
+ROLES = ("llm", "judge", "sim")  # generator, LLM judge, question/user simulator
+
+
+def check_roles_differ() -> None:
+    """Raise if any two roles (generator, judge, simulator) use the same provider and model.
+
+    A model grading its own answers, or writing the questions it later answers or
+    grades, is biased toward them. Set ALLOW_SAME_MODELS=1 to override on purpose,
+    for example for a cheap local run.
+    """
+    if os.getenv("ALLOW_SAME_MODELS") == "1":
+        return
+    chosen = {role: resolve(role) for role in ROLES}
+    for i, a in enumerate(ROLES):
+        for b in ROLES[i + 1:]:
+            if chosen[a] == chosen[b]:
+                raise ValueError(
+                    f"Roles '{a}' and '{b}' both use {chosen[a][0]}/{chosen[a][1]}. Set "
+                    f"{b.upper()}_PROVIDER and/or {b.upper()}_MODEL to a different model, "
+                    "or ALLOW_SAME_MODELS=1 to allow it."
+                )
 
 
 def _client(provider: str):

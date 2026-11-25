@@ -18,19 +18,8 @@ from src.generation.rag import ask, Citation
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Ensure DB schema and feedback table exist on startup."""
+    """Ensure the DB schema, including the feedback table, exists on startup."""
     init_schema()
-    with get_conn() as conn:
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_feedback (
-            id SERIAL PRIMARY KEY,
-            created_at TIMESTAMPTZ DEFAULT now(),
-            question TEXT NOT NULL,
-            answer TEXT NOT NULL,
-            rating INT NOT NULL CHECK (rating IN (-1, 1)),
-            comment TEXT
-        );
-        """)
     yield
 
 
@@ -87,7 +76,7 @@ def feedback_endpoint(req: FeedbackRequest):
         raise HTTPException(status_code=422, detail="rating must be 1 or -1")
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO user_feedback (question, answer, rating, comment) VALUES (%s, %s, %s, %s);",
+            "INSERT INTO user_feedback (question, answer, rating, comment, source) VALUES (%s, %s, %s, %s, 'real');",
             (req.question, req.answer, req.rating, req.comment),
         )
     return {"status": "saved"}

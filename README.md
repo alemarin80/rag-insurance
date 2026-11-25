@@ -11,17 +11,25 @@ The pipeline has four parts:
 - **Storage and retrieval** (`src/ingestion/`, `src/retrieval/`): PostgreSQL 16 with `pgvector` stores 768-dimension `gemini-embedding-2-preview` embeddings in an HNSW (Hierarchical Navigable Small World) index. A GIN (Generalized Inverted Index) over `to_tsvector('norwegian', ...)` provides keyword search. Reciprocal Rank Fusion (RRF) merges both result lists.
 - **Grounded generation** (`src/generation/rag.py`): The configured LLM returns a Pydantic-validated answer with `[doc_name, page_number, quote]` citations. It refuses when the retrieved excerpts don't answer the question.
 - **Automated evaluation** (`src/evals/run_eval.py`): A user simulator generates a fixed Norwegian question set in `data/eval_set.json`. The set covers exact clause lookups, informal customer scenarios, exclusion edge cases, and unanswerable trap questions. An LLM judge scores faithfulness and relevance, and every run is logged to the `eval_logs` table.
-- **API and feedback** (`src/api/app.py`): A FastAPI service with `/health`, `/ask`, and `/feedback`. `/feedback` stores thumbs-up or thumbs-down ratings in the `user_feedback` table.
+- **API and feedback** (`src/api/app.py`): A FastAPI service with `/health`, `/ask`, and `/feedback`. `/feedback` stores thumbs-up or thumbs-down ratings in the `user_feedback` table. The `source` column marks each row as `real` (from the API) or `simulated` (from `simulate_users`).
 
 ```mermaid
 flowchart LR
     PDF[Policy PDFs] -->|PyMuPDF + embeddings| DB[(Postgres: pgvector HNSW + Norwegian tsvector GIN)]
-    Q[User / simulator] --> API[FastAPI /ask]
-    API -->|Hybrid RRF| DB
-    DB -->|Top-5 chunks| LLM[Configured LLM + Pydantic]
-    LLM -->|Answer + citations| API
-    API -->|Thumbs up/down| FB[(user_feedback)]
-    LLM -->|Scored by| JUDGE[LLM judge] --> EVAL[(eval_logs)]
+    DB -->|sample chunks| QSIM["Question simulator (run_eval)"]
+    USER[Real user or app] -->|question| API[FastAPI /ask]
+    subgraph ASK["ask()"]
+        RET["1. Retrieve: hybrid RRF, top-5 chunks"] --> GEN["2. Generate: LLM answer + citations"]
+    end
+    API --> RET
+    QSIM -->|eval question| RET
+    USIM["User simulator (simulate_users)"] -->|conversation turns| RET
+    DB <-->|search| RET
+    GEN --> JUDGE[LLM judge]
+    JUDGE --> EVAL[(eval_logs)]
+    USER -->|real thumbs up/down| API
+    API -->|real ratings| FB[("user_feedback (source: real or simulated)")]
+    USIM -.->|simulated ratings| FB
 ```
 
 ## Choose providers and models
@@ -31,9 +39,12 @@ The generator and the judge can each use Gemini, OpenAI, or Anthropic. Set these
 | Variable | Purpose |
 | :--- | :--- |
 | `LLM_PROVIDER`, `LLM_MODEL` | Answer generation. If unset, the provider is `openai` and the model is the provider default in `src/llm.py`. |
-| `JUDGE_PROVIDER`, `JUDGE_MODEL` | Question simulator, LLM judge, and simulated users. If unset, they fall back to the `LLM_*` values. |
+| `JUDGE_PROVIDER`, `JUDGE_MODEL` | LLM judge that scores answers. |
+| `SIM_PROVIDER`, `SIM_MODEL` | Simulator that writes the eval questions and plays the simulated users. |
 
-`src/llm.py` lists suggested models and marks which ones the smoke test has run. Use a judge from a different provider than the generator to avoid self-preference bias. Embeddings always use Gemini, so a Gemini API key is required in every setup.
+If you leave a role unset, it falls back to the `LLM_*` values.
+
+`src/llm.py` lists suggested models and marks which ones the smoke test has run. Use a judge from a different provider than the generator to avoid self-preference bias. `run_eval` and `simulate_users` refuse to start when any two of the three roles (generator, judge, simulator) use the same provider and model. To allow it on purpose, set `ALLOW_SAME_MODELS=1`. Embeddings always use Gemini, so a Gemini API key is required in every setup.
 
 ## Quickstart
 
@@ -69,6 +80,8 @@ To run the pipeline:
    LLM_MODEL=gpt-5-mini
    JUDGE_PROVIDER=gemini
    JUDGE_MODEL=gemini-4-hydrogen
+   SIM_PROVIDER=openai
+   SIM_MODEL=gpt-5-nano
    ```
 
    Replace `GEMINI_KEY` and `OPENAI_KEY` with your API keys. Add `ANTHROPIC_API_KEY` if you use Anthropic.
@@ -91,13 +104,13 @@ To run the pipeline:
    python -m src.evals.run_eval
    ```
 
-1. Start the API:
+1. Optional: start the API. Skip this step if you only run evals, because `run_eval` calls the pipeline directly:
 
    ```bash
    uvicorn src.api.app:app --reload
    ```
 
-1. Confirm that the API is up. The response is `{"status":"ok"}`:
+1. Optional: confirm that the API is up. The response is `{"status":"ok"}`:
 
    ```bash
    curl http://localhost:8000/health
@@ -133,4 +146,3 @@ Setting `thinking_level="low"` on Gemini cut average latency by about 73% (11.9 
 
 - All three modes score 1.00, so the eval set can't yet separate them. A harder set with multi-policy and table-heavy questions would show a difference.
 - The retrieval step has no reranker.
-- `python -m src.evals.simulate_users` writes to the `user_feedback` table, which the API creates on startup. Start the API once before you run it.
