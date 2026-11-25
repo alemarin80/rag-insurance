@@ -1,6 +1,6 @@
 # Norwegian insurance policy RAG and evaluation
 
-This repository shows how to build and evaluate a retrieval-augmented generation (RAG) pipeline over Norwegian insurance policy terms (*forsikringsvilkår*) without an orchestration framework. It is for engineers who want a small, readable example of hybrid retrieval, citation-grounded answers, and automated evaluation. After the Quickstart, you can ask policy questions through an API and score the answers with a simulated user and an LLM judge.
+This repository shows how to build and evaluate a retrieval-augmented generation (RAG) pipeline over Norwegian insurance policy terms (*forsikringsvilkår*) without an orchestration framework. It is for engineers who want a small, readable example of hybrid retrieval, citation-grounded answers, and automated evaluation. After the Quickstart, you can ask policy questions through an API and score the answers with a simulated user and a judge based on a large language model (LLM).
 
 This repository doesn't include a web UI, authentication, or the policy PDFs.
 
@@ -168,6 +168,53 @@ To check that each provider and model works, run the live smoke test. It costs a
 ```bash
 python -m tests.smoke_llm --e2e
 ```
+
+## How the evaluation works
+
+The command `python -m src.evals.run_eval` runs three stages:
+
+1. **Generate questions.** If `data/eval_set.json` doesn't exist, a simulator LLM writes a question set and saves it there. Later runs reuse the file, so every run and every model you try answers the same questions.
+1. **Retrieve and answer.** For each question, the pipeline runs once per retrieval mode (`vector`, then `hybrid`). The mode only changes how `src/retrieval/search.py` picks the top 5 chunks. The generator LLM then answers from those chunks.
+1. **Judge.** A separate judge LLM scores each answer. It receives the question, the answer, the answer's `is_covered_in_context` flag, and the retrieved chunks. It doesn't receive the retrieval mode or the source page of the question. It does know whether the question is a trap. The script writes each result to `eval_logs`, with the mode and the generator and judge model names.
+
+### Question generation
+
+The simulator writes 18 questions: 15 from policy text and 3 fixed trap questions. To write the 15, it does the following for each of three question types:
+
+1. Pick 5 random chunks from the `chunks` table (`ORDER BY RANDOM()`).
+1. Send each chunk and the instruction for that type to the simulator LLM (`SIM_PROVIDER`, `SIM_MODEL`, temperature 0.7). The LLM returns one Norwegian question as structured output.
+1. Store the question with `expected_source`, the `document#page` of the chunk it came from.
+
+The three draws are independent, so one chunk can produce questions of different types, and a PDF with more chunks tends to get more questions.
+
+The following table lists the question types:
+
+| Type | Count | Instruction to the simulator |
+| :--- | :---: | :--- |
+| `exact_lookup` | 5 | Ask for an exact number, age, day limit, amount, or clause condition, without copying the surrounding sentence. |
+| `messy_user` | 5 | Write an informal, vague, real-life scenario from a stressed customer, without insurance jargon. |
+| `exclusion_edge` | 5 | Ask whether a specific exception or limitation applies. |
+| `trap` | 3 | Fixed, hand-written questions that the policies don't answer, such as crypto fraud or dog dental care. `expected_source` is `NONE`. |
+
+### What the scores measure
+
+The run prints three scores per retrieval mode:
+
+- **Recall@5** (recall at 5, answerable questions only): 1 if the `expected_source` page is among the 5 retrieved chunks, otherwise 0. It measures retrieval alone, with no generator or judge model involved.
+- **Faithfulness** (judge, 0 to 1): 1 if no claim goes beyond the retrieved chunks.
+- **Relevance** (judge, 0 to 1): 1 if the answer addresses the question. For a trap question, 1 only if the bot refused.
+
+### Known weaknesses
+
+The design has these limits:
+
+- Each question comes from one chunk, so the set has no questions that need several policies or tables.
+- Recall@5 matches the exact page. A question that another page answers equally well counts as a miss.
+- The judge has no reference answer. It checks the answer against the retrieved chunks only, so an answer grounded in the wrong chunks can still score high.
+- The scores are LLM estimates. This repository doesn't validate them against human grades.
+- The simulator sees the chunk, so a question can echo its wording and make retrieval look easier than it is for real customers.
+
+To change the question mix, edit `styles` and `n_per_type` in `generate_eval_set()` in `src/evals/run_eval.py`. Then delete `data/eval_set.json`, as described in [Reset the data](#reset-the-data).
 
 ## Benchmark results
 
