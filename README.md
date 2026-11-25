@@ -14,18 +14,18 @@ The pipeline has four parts:
 - **API and feedback** (`src/api/app.py`): A FastAPI service with `/health`, `/ask`, and `/feedback`. `/feedback` stores thumbs-up or thumbs-down ratings in the `user_feedback` table. The `source` column marks each row as `real` (from the API) or `simulated` (from `simulate_users`).
 
 ```mermaid
-flowchart LR
+flowchart TB
     PDF[Policy PDFs] -->|PyMuPDF + embeddings| DB[(Postgres: pgvector HNSW + Norwegian tsvector GIN)]
     DB -->|sample chunks| QSIM["Question simulator (run_eval)"]
-    USER[Real user or app] -->|question| API[FastAPI /ask]
-    subgraph ASK["ask()"]
-        RET["1. Retrieve: hybrid RRF, top-5 chunks"] --> GEN["2. Generate: LLM answer + citations"]
-    end
-    API --> RET
     QSIM -->|eval question| RET
     USIM["User simulator (simulate_users)"] -->|conversation turns| RET
-    DB <-->|search| RET
-    GEN --> JUDGE[LLM judge]
+    USER[Real user or app] -->|question| API[FastAPI /ask]
+    API -->|question| RET
+    subgraph ASK["ask()"]
+        RET["1. Retrieve: hybrid RRF, top-5 chunks"] -->|chunks| GEN["2. Generate: LLM answer + citations"]
+    end
+    RET <-->|search| DB
+    GEN -->|answer| JUDGE[LLM judge]
     JUDGE --> EVAL[(eval_logs)]
     USER -->|real thumbs up/down| API
     API -->|real ratings| FB[("user_feedback (source: real or simulated)")]
