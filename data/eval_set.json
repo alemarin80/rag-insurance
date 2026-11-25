@@ -1,0 +1,92 @@
+[
+  {
+    "type": "exact_lookup",
+    "question": "Hvor mange dager etter et eierskifte gjelder forsikringen min dersom den nye eieren ikke har tegnet egen avtale?",
+    "expected_source": "fremtind_bil_kasko.pdf#p1"
+  },
+  {
+    "type": "exact_lookup",
+    "question": "Ved hvilken alder slutter ulykkesforsikringen å gjelde?",
+    "expected_source": "fremtind_reise.pdf#p1"
+  },
+  {
+    "type": "exact_lookup",
+    "question": "Hvor lenge gjelder innboforsikringen etter et eierskifte hvis den nye eieren ikke har tegnet egen forsikring ennå?",
+    "expected_source": "fremtind_innbo_topp.pdf#p1"
+  },
+  {
+    "type": "exact_lookup",
+    "question": "Hvor lenge gjelder innboforsikringen etter et eierskifte hvis den nye eieren ikke har skaffet seg egen forsikring?",
+    "expected_source": "fremtind_innbo_standard.pdf#p1"
+  },
+  {
+    "type": "exact_lookup",
+    "question": "Når dekkes utgifter til søksmål hvis saken gjelder et offentlig forvaltningsvedtak?",
+    "expected_source": "fremtind_reise.pdf#p14"
+  },
+  {
+    "type": "messy_user",
+    "question": "Jeg solgte bilen min i går, og nå ringte kjøperen og sa han har krasjet før han rakk å ordne seg egen forsikring – gjelder min fortsatt, eller er jeg helt ille ute nå?",
+    "expected_source": "fremtind_bil_ansvar.pdf#p1"
+  },
+  {
+    "type": "messy_user",
+    "question": "Hei, vi har akkurat gått fra hverandre og jeg flyttet ut for tre uker siden, men jeg har ikke rukket å ordne ny forsikring ennå – er tingene mine fortsatt dekket?",
+    "expected_source": "fremtind_innbo_standard.pdf#p1"
+  },
+  {
+    "type": "messy_user",
+    "question": "Hei, kommunen har akkurat fattet et vedtak mot meg som jeg er helt uenig i, og jeg skjønner ikke hvordan jeg skal komme noen vei uten hjelp. Kan dere hjelpe meg med å betale for advokat mens jeg klager på dette?",
+    "expected_source": "fremtind_reise.pdf#p14"
+  },
+  {
+    "type": "messy_user",
+    "question": "Hei, jeg solgte bilen min for et par dager siden, og nå sier han som kjøpte den at han ikke har fått ordnet forsikring ennå og har vært borti noe. Gjelder min forsikring fortsatt da, eller?",
+    "expected_source": "fremtind_bil_kasko.pdf#p1"
+  },
+  {
+    "type": "messy_user",
+    "question": "Hei, vi skal reise på ferie i morgen og jeg ble plutselig veldig stressa – gjelder reiseforsikringen min også for samboeren min og barnebarnet vårt som skal være med på turen?",
+    "expected_source": "fremtind_reise.pdf#p1"
+  },
+  {
+    "type": "exclusion_edge",
+    "question": "Jeg og ektefellen min har fått bevilling til separasjon, men avgjørelsen er ikke endelig ennå – gjelder innboforsikringen min fortsatt for ham?",
+    "expected_source": "fremtind_innbo_topp.pdf#p1"
+  },
+  {
+    "type": "exclusion_edge",
+    "question": "Gjelder reiseforsikringen for barnet vårt som er født av surrogatmor i utlandet på selve hjemreisen til Norge, før vi har kommet frem til boligen vår?",
+    "expected_source": "fremtind_reise.pdf#p1"
+  },
+  {
+    "type": "exclusion_edge",
+    "question": "Hvis jeg kjører i den europeiske delen av Tyrkia, gjelder bilforsikringen min der?",
+    "expected_source": "fremtind_bil_kasko.pdf#p1"
+  },
+  {
+    "type": "exclusion_edge",
+    "question": "Jeg skal kjøre til den europeiske delen av Tyrkia, gjelder bilforsikringen min der siden det teknisk sett er i Europa?",
+    "expected_source": "fremtind_bil_ansvar.pdf#p1"
+  },
+  {
+    "type": "exclusion_edge",
+    "question": "Hvis jeg har klaget på et offentlig forvaltningsvedtak og tapt, og deretter går til søksmål, vil rettshjelpsforsikringen også dekke advokatutgiftene jeg hadde under selve klagebehandlingen?",
+    "expected_source": "fremtind_reise.pdf#p14"
+  },
+  {
+    "type": "trap",
+    "question": "Dekker forsikringen tap av kryptovaluta ved nettsvindel?",
+    "expected_source": "NONE"
+  },
+  {
+    "type": "trap",
+    "question": "Hva er egenandelen for tannlegebehandling av hund?",
+    "expected_source": "NONE"
+  },
+  {
+    "type": "trap",
+    "question": "Gjelder bilforsikringen for elektrisk sparkesykkel på ferie i Spania?",
+    "expected_source": "NONE"
+  }
+]
