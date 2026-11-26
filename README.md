@@ -213,6 +213,19 @@ The run prints three scores per retrieval mode:
 docker exec insurance_rag_db psql -U rag -d insurance_rag -c "SELECT question, expected_source, retrieved FROM eval_logs WHERE retrieval_hit = false ORDER BY id DESC;"
 ```
 
+### Retrieval-only evaluation
+
+To measure search without an answer model or a judge, use these commands. For the metrics and logs, see the [spec](docs/specs/step0-retrieval-eval.md).
+
+| Command | Does |
+| :--- | :--- |
+| `python -m src.evals.retrieval_eval generate` | Writes 90 questions, once (paid LLM calls) |
+| `python -m src.evals.retrieval_eval check` | Hand-checks the `test` questions |
+| `python -m src.evals.retrieval_eval run --mode vector` | Scores `vector` on `dev` and logs the run |
+| `python -m src.evals.retrieval_eval run --mode hybrid --baseline RUN_ID` | Scores and compares with an earlier run |
+
+Replace `RUN_ID` with the ID that an earlier run printed. `run` needs committed code.
+
 ### Known weaknesses
 
 The design has these limits:
