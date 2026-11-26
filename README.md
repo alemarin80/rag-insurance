@@ -116,29 +116,40 @@ To run the pipeline:
 
 Use these commands when you add or change PDFs, change the chunk size or the embedding model, or want fresh eval results. Run them from the repository root with the virtual environment active.
 
-To rebuild the policy chunks, run the ingest again. It deletes every row in `chunks` first, so you can run it any time:
+To see the row counts, the chunks per PDF, and whether the eval set exists:
+
+```bash
+python -m src.ops.data status
+```
+
+`reset` only deletes data. It rebuilds nothing. Name one or more targets:
+
+| Target | What `reset` deletes |
+| :--- | :--- |
+| `chunks` | Every policy chunk |
+| `eval_logs` | Every eval run |
+| `user_feedback` | Simulated feedback. Add `--include-real` to delete real feedback too |
+| `eval_set` | `data/eval_set.json` |
+
+```bash
+python -m src.ops.data reset eval_logs user_feedback
+```
+
+The command shows what it deletes and asks for confirmation. Add `--yes` to skip the prompt.
+
+To rebuild the policy chunks, run the ingest. It deletes every row in `chunks` first, so you don't need a reset:
 
 ```bash
 python -m src.ingestion.ingest
 ```
 
-Confirm that the table has about one chunk per 1,000 characters of policy text:
-
-```bash
-docker exec insurance_rag_db psql -U rag -d insurance_rag -c "SELECT doc_name, count(*) FROM chunks GROUP BY doc_name ORDER BY 1;"
-```
+Run `python -m src.ops.data status` to confirm that the table has about one chunk per 1,000 characters of policy text.
 
 After you re-ingest, regenerate the eval questions. They come from random chunks, so old questions no longer match the new content. Delete the file, and the next `run_eval` writes a new `data/eval_set.json` (see [Question generation](#question-generation)):
 
 ```bash
-rm data/eval_set.json
+python -m src.ops.data reset eval_set
 python -m src.evals.run_eval
-```
-
-To clear logged results without touching the policy chunks, truncate the log tables. This deletes every eval run and every feedback row, real and simulated:
-
-```bash
-docker exec insurance_rag_db psql -U rag -d insurance_rag -c "TRUNCATE eval_logs, user_feedback RESTART IDENTITY;"
 ```
 
 To start over completely, delete the database volume. This removes `chunks`, `eval_logs`, and `user_feedback`. Then run the Quickstart from step 1 again:
