@@ -91,7 +91,7 @@ To run the pipeline:
 1. Confirm that the `chunks` table has rows:
 
    ```bash
-   docker exec insurance_rag_db psql -U rag -d insurance_rag -c "SELECT count(*) FROM chunks;"
+   python -m src.ops.data status
    ```
 
 1. Run the benchmark. It compares `vector` and `hybrid` retrieval and prints a summary line per mode:
@@ -112,44 +112,49 @@ To run the pipeline:
    curl http://localhost:8000/health
    ```
 
-## Reset the data
+## Build the data
 
-Use these commands when you add or change PDFs, change the chunk size or the embedding model, or want fresh eval results. Run them from the repository root with the virtual environment active.
+Run these commands from the repository root with the virtual environment active.
 
-To rebuild the policy chunks, run the ingest again. It deletes every row in `chunks` first, so you can run it any time:
+### Build
 
-```bash
-python -m src.ingestion.ingest
-```
-
-Confirm that the table has about one chunk per 1,000 characters of policy text:
+After you change the PDFs, the chunk size or `EMBED_MODEL`, run:
 
 ```bash
-docker exec insurance_rag_db psql -U rag -d insurance_rag -c "SELECT doc_name, count(*) FROM chunks GROUP BY doc_name ORDER BY 1;"
+python -m src.ingestion.ingest               # replace all chunks
+python -m src.ops.data reset eval_set --yes  # old questions are stale
+python -m src.evals.run_eval                 # new questions and benchmark
 ```
 
-After you re-ingest, regenerate the eval questions. They come from random chunks, so old questions no longer match the new content. Delete the file, and the next `run_eval` writes a new `data/eval_set.json` (see [Question generation](#question-generation)):
+### Check
+
+To see row counts, chunks per PDF and whether the eval set exists, run:
 
 ```bash
-rm data/eval_set.json
-python -m src.evals.run_eval
+python -m src.ops.data status
 ```
 
-To clear logged results without touching the policy chunks, truncate the log tables. This deletes every eval run and every feedback row, real and simulated:
+### Reset
 
-```bash
-docker exec insurance_rag_db psql -U rag -d insurance_rag -c "TRUNCATE eval_logs, user_feedback RESTART IDENTITY;"
-```
+`reset` only deletes and asks for confirmation (`--yes` skips it). Choose a command:
 
-To start over completely, delete the database volume. This removes `chunks`, `eval_logs`, and `user_feedback`. Then run the Quickstart from step 1 again:
+| Command | Deletes |
+| :--- | :--- |
+| `python -m src.ops.data reset chunks` | All chunks |
+| `python -m src.ops.data reset eval_logs` | All eval runs |
+| `python -m src.ops.data reset user_feedback` | Simulated feedback |
+| `python -m src.ops.data reset user_feedback --include-real` | All feedback |
+| `python -m src.ops.data reset eval_set` | `data/eval_set.json` |
+| `python -m src.ops.data reset chunks eval_logs eval_set` | All three |
+
+### Start over
+
+After you change `EMBED_DIM`, run these commands, then [Build](#build). They delete the whole database, including real feedback:
 
 ```bash
 docker compose down -v
 docker compose up -d
-python -m src.ingestion.ingest
 ```
-
-If you change `EMBED_MODEL` or `EMBED_DIM` in `src/llm.py`, run `docker compose down -v` instead of the plain ingest, because the `chunks` table keeps its old vector size.
 
 ## Test your setup
 
@@ -218,7 +223,7 @@ The design has these limits:
 - The scores are LLM estimates. This repository doesn't validate them against human grades.
 - The simulator sees the chunk, so a question can echo its wording and make retrieval look easier than it is for real customers.
 
-To change the question mix, edit `styles` and `n_per_type` in `generate_eval_set()` in `src/evals/run_eval.py`. Then delete `data/eval_set.json`, as described in [Reset the data](#reset-the-data).
+To change the question mix, edit `styles` and `n_per_type` in `generate_eval_set()` in `src/evals/run_eval.py`. Then run `python -m src.ops.data reset eval_set` (see [Reset](#reset)).
 
 ## Benchmark results
 
