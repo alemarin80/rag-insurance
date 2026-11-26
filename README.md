@@ -91,7 +91,7 @@ To run the pipeline:
 1. Confirm that the `chunks` table has rows:
 
    ```bash
-   docker exec insurance_rag_db psql -U rag -d insurance_rag -c "SELECT count(*) FROM chunks;"
+   python -m src.ops.data status
    ```
 
 1. Run the benchmark. It compares `vector` and `hybrid` retrieval and prints a summary line per mode:
@@ -112,55 +112,49 @@ To run the pipeline:
    curl http://localhost:8000/health
    ```
 
-## Reset the data
+## Build the data
 
-Use these commands when you add or change PDFs, change the chunk size or the embedding model, or want fresh eval results. Run them from the repository root with the virtual environment active.
+Run these commands from the repository root with the virtual environment active.
 
-To see the row counts, the chunks per PDF, and whether the eval set exists:
+### Build
+
+After you change the PDFs, the chunk size or `EMBED_MODEL`, run:
+
+```bash
+python -m src.ingestion.ingest               # replace all chunks
+python -m src.ops.data reset eval_set --yes  # old questions are stale
+python -m src.evals.run_eval                 # new questions and benchmark
+```
+
+### Check
+
+To see row counts, chunks per PDF and whether the eval set exists, run:
 
 ```bash
 python -m src.ops.data status
 ```
 
-`reset` only deletes data. It rebuilds nothing. Name one or more targets:
+### Reset
 
-| Target | What `reset` deletes |
+`reset` only deletes and asks for confirmation (`--yes` skips it). Choose a command:
+
+| Command | Deletes |
 | :--- | :--- |
-| `chunks` | Every policy chunk |
-| `eval_logs` | Every eval run |
-| `user_feedback` | Simulated feedback. Add `--include-real` to delete real feedback too |
-| `eval_set` | `data/eval_set.json` |
+| `python -m src.ops.data reset chunks` | All chunks |
+| `python -m src.ops.data reset eval_logs` | All eval runs |
+| `python -m src.ops.data reset user_feedback` | Simulated feedback |
+| `python -m src.ops.data reset user_feedback --include-real` | All feedback |
+| `python -m src.ops.data reset eval_set` | `data/eval_set.json` |
+| `python -m src.ops.data reset chunks eval_logs eval_set` | All three |
 
-```bash
-python -m src.ops.data reset eval_logs user_feedback
-```
+### Start over
 
-The command shows what it deletes and asks for confirmation. Add `--yes` to skip the prompt.
-
-To rebuild the policy chunks, run the ingest. It deletes every row in `chunks` first, so you don't need a reset:
-
-```bash
-python -m src.ingestion.ingest
-```
-
-Run `python -m src.ops.data status` to confirm that the table has about one chunk per 1,000 characters of policy text.
-
-After you re-ingest, regenerate the eval questions. They come from random chunks, so old questions no longer match the new content. Delete the file, and the next `run_eval` writes a new `data/eval_set.json` (see [Question generation](#question-generation)):
-
-```bash
-python -m src.ops.data reset eval_set
-python -m src.evals.run_eval
-```
-
-To start over completely, delete the database volume. This removes `chunks`, `eval_logs`, and `user_feedback`. Then run the Quickstart from step 1 again:
+After you change `EMBED_DIM`, run these commands, then [Build](#build). They delete the whole database, including real feedback:
 
 ```bash
 docker compose down -v
 docker compose up -d
-python -m src.ingestion.ingest
 ```
-
-If you change `EMBED_MODEL` or `EMBED_DIM` in `src/llm.py`, run `docker compose down -v` instead of the plain ingest, because the `chunks` table keeps its old vector size.
 
 ## Test your setup
 
@@ -229,7 +223,7 @@ The design has these limits:
 - The scores are LLM estimates. This repository doesn't validate them against human grades.
 - The simulator sees the chunk, so a question can echo its wording and make retrieval look easier than it is for real customers.
 
-To change the question mix, edit `styles` and `n_per_type` in `generate_eval_set()` in `src/evals/run_eval.py`. Then delete `data/eval_set.json`, as described in [Reset the data](#reset-the-data).
+To change the question mix, edit `styles` and `n_per_type` in `generate_eval_set()` in `src/evals/run_eval.py`. Then run `python -m src.ops.data reset eval_set` (see [Reset](#reset)).
 
 ## Benchmark results
 
