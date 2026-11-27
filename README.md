@@ -220,6 +220,7 @@ To measure search without an answer model or a judge, use these commands. For th
 | Command | Does |
 | :--- | :--- |
 | `python -m src.evals.retrieval_eval generate` | Writes 90 questions, once (paid LLM calls) |
+| `python -m src.evals.retrieval_eval match` | Adds pages that repeat a question's source text |
 | `python -m src.evals.retrieval_eval check` | Hand-checks the `test` questions |
 | `python -m src.evals.retrieval_eval run --mode vector` | Scores `vector` on `dev` and logs the run |
 | `python -m src.evals.retrieval_eval run --mode hybrid --baseline RUN_ID` | Scores and compares with an earlier run |

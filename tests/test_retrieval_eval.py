@@ -57,7 +57,7 @@ def test_rank_pages_counts_a_page_once_at_its_best_rank():
 
 def test_score_hit_at_rank_two():
     m = ev.score_ranking(["x", "g", "y"], ["g"])
-    assert (m["recall@1"], m["recall@5"], m["mrr@20"]) == (0.0, 1.0, 0.5)
+    assert (m["hit@1"], m["hit@5"], m["mrr@20"]) == (0.0, 1.0, 0.5)
     assert m["ndcg@5"] == pytest.approx(1 / math.log2(3))
 
 
@@ -65,12 +65,15 @@ def test_score_no_hit():
     assert set(ev.score_ranking(["x", "y"], ["g"]).values()) == {0.0}
 
 
-def test_score_two_gold_pages():
-    m = ev.score_ranking(["g1", "x", "g2"], ["g1", "g2"])
-    assert m["recall@1"] == 0.5
-    assert m["recall@5"] == 1.0
-    assert m["mrr@20"] == 1.0
-    assert m["ndcg@5"] == pytest.approx((1 + 0.5) / (1 + 1 / math.log2(3)))
+def test_score_any_gold_page_is_enough():
+    m = ev.score_ranking(["x", "g2", "g1"], ["g1", "g2"])
+    assert (m["hit@1"], m["hit@5"], m["mrr@20"]) == (0.0, 1.0, 0.5)
+    assert m["ndcg@5"] == pytest.approx(1 / math.log2(3))
+
+
+def test_score_hit_below_rank_five():
+    m = ev.score_ranking([*"abcde", "g"], ["g"])
+    assert (m["hit@5"], m["hit@20"], m["ndcg@5"]) == (0.0, 1.0, 0.0)
 
 
 def test_time_stats():
@@ -114,6 +117,48 @@ def test_generate_resumes_without_repeating_calls(env):
     assert len(ev.read_jsonl(ev.QUESTIONS_PATH)) == 90
 
 
+# --- match ---
+
+TEXT = "ved krav om oppgjør skal salærkrav dokumenteres med spesifisert timeliste og timesats innen 14 dager"
+
+
+def page_chunk(doc, content, page=1, index=0):
+    return {"doc_name": doc, "page_number": page, "chunk_index": index, "content": content}
+
+
+def test_matching_pages_needs_the_text_and_its_numbers():
+    pages = ev.group_by_page([
+        page_chunk("same", f"Innledning. {TEXT}. Slutt."),
+        page_chunk("other_number", TEXT.replace("14", "30") + " og 99"),
+        page_chunk("half", " ".join(TEXT.split()[:13]) + " 14"),
+        page_chunk("unrelated", "noe helt annet 14"),
+    ])
+    assert ev.matching_pages(TEXT, pages) == ["same#p1"]
+
+
+def test_matching_pages_short_text_is_one_run():
+    pages = ev.group_by_page([page_chunk("a", "xx gjelder ikke her yy"), page_chunk("b", "gjelder her ikke")])
+    assert ev.matching_pages("gjelder ikke her", pages) == ["a#p1"]
+    assert ev.matching_pages("•", pages) == []
+
+
+def test_match_adds_once_and_keeps_removed_pages_out(env, monkeypatch):
+    chunks = [page_chunk(d, TEXT) for d in ("doc0.pdf", "doc1.pdf", "doc2.pdf")]
+    monkeypatch.setattr(ev, "load_chunks", lambda: chunks)
+    make_questions(1)
+    ev.match()
+    ev.match()
+    assert ev.read_jsonl(ev.QUESTIONS_PATH)[0]["gold_pages"] == ["doc0.pdf#p1", "doc1.pdf#p1", "doc2.pdf#p1"]
+    rows = ev.read_jsonl(ev.QUESTIONS_PATH)
+    rows[0]["checked"] = False
+    ev.write_jsonl(ev.QUESTIONS_PATH, rows)
+    answers = iter(["r", "doc0.pdf#p1", "r", "doc1.pdf#p1", "k"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    ev.check(split="dev")
+    ev.match()
+    assert ev.read_jsonl(ev.QUESTIONS_PATH)[0]["gold_pages"] == ["doc0.pdf#p1", "doc2.pdf#p1"]
+
+
 # --- check ---
 
 def test_check_saves_and_continues(env, monkeypatch):
@@ -143,7 +188,7 @@ def test_run_logs_and_reuses_embeddings(env):
     assert [r["run_id"] for r in ev.read_jsonl(ev.RUNS_LOG)] == [first["run_id"], second["run_id"]]
     assert len(ev.read_jsonl(ev.RUNS_DIR / f"{first['run_id']}.jsonl")) == 4
     assert first["commit"] == "abc123"
-    assert first["metrics"]["recall@1"] == 1.0
+    assert first["metrics"]["hit@1"] == 1.0
     assert first["chunk_count"] == len(CHUNKS)
 
 

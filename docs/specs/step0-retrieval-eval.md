@@ -98,3 +98,26 @@ python -m src.evals.retrieval_eval run --mode hybrid --split test --baseline RUN
 ## First results
 
 Run `vector` and `hybrid` on `dev` as the baseline for steps 1 to 3. Keep `test` for the final comparison.
+
+## Proposed change: repeated text
+
+Status: approved 2026-11-27. It replaces the parts above that conflict with it.
+
+An AI assistant (Claude), not a person, checked most `test` questions: it judged whether each one can be answered and added pages that hold the same answer. The field `checked_by` records `user` or `assistant`. Treat the `test` labels as AI-checked.
+
+As an exception to "not replaced", `q040`, `q019` and `q034` were dropped and replaced by `q091`, `q092` and `q093`, with one LLM call each. `q019` and `q034` came from chunks shorter than 12 words, so their replacements use chunks of at least 50 words.
+
+The policies share text, so several pages can answer one question.
+
+- Every page in `gold_pages` answers the question. Finding any one of them is a hit.
+- A new command, `match`, adds pages to `gold_pages`. A page is added if it contains at least 80% of the source chunk's runs of 12 words, and every number in the source chunk. A chunk shorter than 12 words counts as one run. Running `match` again adds nothing new.
+- `check` lists the added pages. `f` shows them in full, `a` adds a page and the new key `r` removes one.
+- Metrics, with the rank of the first gold page found:
+
+| Metric | Definition |
+| :--- | :--- |
+| Hit@1, @5, @20 (replaces Recall) | 1 if a gold page is in the top k, else 0 |
+| MRR@20 | 1 / rank, 0 if none |
+| nDCG@5 | 1 / log2(rank + 1), 0 if the rank is over 5 |
+
+Limit: a page with less than 80% of the text is not added, even if it holds the answer. The hand-check can add such pages to `test` questions. `dev` questions keep the miss.
