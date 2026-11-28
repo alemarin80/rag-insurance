@@ -186,12 +186,17 @@ The following table shows scorer version 2 on 53 `dev` questions:
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `vector` | original | 0.623 | 0.830 | 0.962 | 0.707 | 0.726 |
 | `hybrid` | original | 0.641 | 0.830 | 0.962 | 0.721 | 0.737 |
+| `bm25` | original | 0.717 | 0.906 | 0.981 | 0.814 | 0.830 |
 | `vector` | reworded | 0.528 | 0.792 | 0.943 | 0.633 | 0.662 |
 | `hybrid` | reworded | 0.528 | 0.792 | 0.943 | 0.633 | 0.662 |
+| `bm25` | reworded | 0.547 | 0.792 | 0.887 | 0.661 | 0.686 |
 
 - On the original wording, `hybrid` scored better on 1 question and worse on none. The difference on nDCG@5 is +0.011 (95% interval 0.000 to +0.032), which is no measurable difference.
 - On the reworded wording, `hybrid` and `vector` score the same on every question. The keyword side of `hybrid` needs every word of the question in the chunk, and a reworded question doesn't have that.
 - Rewording made `vector` worse on 8 questions and better on 1. The reworded numbers are the baseline for later steps; the original ones show how much copied words help.
+- `bm25` (step 1, [spec](docs/specs/step1-bm25.md)) is BM25 word search with Norwegian stemming. On the original wording it leads `vector` on every metric: 16 questions better, 9 worse, nDCG@5 +0.104 (95% interval -0.008 to +0.213). The interval includes 0, so this is no measurable difference, and the copied words favor `bm25`.
+- On the reworded wording, `bm25` and `vector` are level: 16 questions better, 13 worse, nDCG@5 +0.024 (95% interval -0.106 to +0.154). `bm25` finds the answer in the top 20 less often (0.887 against 0.943).
+- `bm25` and `vector` miss different questions. On the reworded wording each misses 11 in the top 5, but only 4 of them are the same (`q046`, `q064`, `q082`, `q088`). This is the case for combining them in step 4.
 
 ### What changed since the pilot
 
@@ -215,6 +220,7 @@ The [pilot](docs/reports/step0-results.md) marked results by page and showed `hy
 | `python -m src.evals.retrieval_eval run --mode vector` | Scores `vector` on `dev` and logs the run |
 | `python -m src.evals.retrieval_eval run --mode hybrid --baseline RUN_ID` | Scores and compares with an earlier run |
 | `python -m src.evals.retrieval_eval run --mode vector --wording reworded` | Scores with the reworded questions |
+| `python -m src.evals.retrieval_eval run --mode bm25` | Scores BM25, with no API call |
 
 Replace `RUN_ID` with the ID that an earlier run printed. `run` needs committed code.
 

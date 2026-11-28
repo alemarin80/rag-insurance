@@ -5,7 +5,7 @@ Evaluation comes first. Each step changes one thing and logs one result.
 | Step | Change | Needs new embeddings |
 | :---: | :--- | :--- |
 | 0 | Retrieval-only evaluation ([spec](specs/step0-retrieval-eval.md)). Done: `vector` and `hybrid` scored | Queries, once |
-| 1 | BM25 alone, using `bm25s` with a Norwegian stemmer | No |
+| 1 | BM25 alone, using `bm25s` with a Norwegian stemmer ([spec](specs/step1-bm25.md)). Done: level with `vector` on reworded questions, misses different ones | No |
 | 2 | Sentence chunking (spaCy Norwegian), chunks allowed to cross pages | All chunks |
 | 3 | Exact duplicate chunks stored once, with every source page | All chunks |
 | 4 | Hybrid with Reciprocal Rank Fusion (BM25 and dense) | No |
