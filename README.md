@@ -185,8 +185,9 @@ The project has two different word searches. BM25 doesn't use the PostgreSQL key
 | `vector` | By meaning: cosine similarity of the question and chunk embeddings | `--mode vector`, the API |
 | `hybrid` | `vector` plus PostgreSQL keyword search (`plainto_tsquery`), merged with RRF. A chunk matches the keyword side only if it contains every word of the question, after stemming and without stop words | `--mode hybrid`, the API default, `run_eval` |
 | `bm25` | BM25 in memory (`src/retrieval/bm25.py`). Every chunk gets a score for each question word it contains, weighted by how rare the word is | `--mode bm25` only |
+| `hybrid_bm25` | `vector` plus `bm25`, merged with RRF: the top 30 chunks of each side, scored `1 / (60 + rank)` per side | `--mode hybrid_bm25` only |
 
-The PostgreSQL keyword search matches almost nothing: 2 of the 53 `dev` questions in the original wording, and 1 in the reworded wording. Today's `hybrid` is therefore close to `vector` alone. It stays as the baseline that a `hybrid` with BM25 instead (step 4) must beat.
+The PostgreSQL keyword search matches almost nothing: 2 of the 53 `dev` questions in the original wording, and 1 in the reworded wording. Today's `hybrid` is therefore close to `vector` alone. It stays as the baseline for `hybrid_bm25` (step 4), which uses BM25 instead.
 
 For example, `q043` asks `Hva er erstatningen for tyveri av sykkel registrert i FG-godkjent sykkelregister?`. Every word is in the chunk, so the keyword search matches. Its reworded version, `Hvor mye får jeg hvis sykkelen min blir stjålet og den står i et godkjent sykkelregister?`, contains words that the chunk doesn't, so the keyword search finds nothing. BM25 still scores the chunk on `sykkel` and `sykkelregister`.
 
@@ -201,9 +202,11 @@ The following table shows scorer version 2 on 53 `dev` questions:
 | `vector` | original | 0.623 | 0.830 | 0.962 | 0.707 | 0.726 |
 | `hybrid` | original | 0.641 | 0.830 | 0.962 | 0.721 | 0.737 |
 | `bm25` | original | 0.717 | 0.906 | 0.981 | 0.814 | 0.830 |
+| `hybrid_bm25` | original | 0.774 | 0.906 | 1.000 | 0.828 | 0.842 |
 | `vector` | reworded | 0.528 | 0.792 | 0.943 | 0.633 | 0.662 |
 | `hybrid` | reworded | 0.528 | 0.792 | 0.943 | 0.633 | 0.662 |
 | `bm25` | reworded | 0.547 | 0.792 | 0.887 | 0.661 | 0.686 |
+| `hybrid_bm25` | reworded | 0.604 | 0.830 | 0.962 | 0.705 | 0.728 |
 
 - On the original wording, `hybrid` scored better on 1 question and worse on none. The difference on nDCG@5 is +0.011 (95% interval 0.000 to +0.032), which is no measurable difference.
 - On the reworded wording, `hybrid` and `vector` score the same on every question. The keyword side matches only `q092`, and that match doesn't change its rank.
@@ -211,6 +214,11 @@ The following table shows scorer version 2 on 53 `dev` questions:
 - `bm25` (step 1, [spec](docs/specs/step1-bm25.md)) is BM25 word search with Norwegian stemming. On the original wording it leads `vector` on every metric: 16 questions better, 9 worse, nDCG@5 +0.104 (95% interval -0.008 to +0.213). The interval includes 0, so this is no measurable difference, and the copied words favor `bm25`.
 - On the reworded wording, `bm25` and `vector` are level: 16 questions better, 13 worse, nDCG@5 +0.024 (95% interval -0.106 to +0.154). `bm25` finds the answer in the top 20 less often (0.887 against 0.943).
 - `bm25` and `vector` miss different questions. On the reworded wording each misses 11 in the top 5, but only 4 of them are the same (`q046`, `q064`, `q082`, `q088`). This is the case for combining them in step 4.
+- `hybrid_bm25` (step 4, [spec](docs/specs/step4-hybrid-bm25.md)) against today's `hybrid`, on nDCG@5:
+  - Original wording: 13 questions better, 2 worse, +0.105 (95% interval +0.036 to +0.178). This is the first measurable gain, but the copied words help the BM25 side.
+  - Reworded wording: 14 better (for example `q007`, `q043`, `q090`), 5 worse (`q009`, `q029`, `q035`, `q060`, `q072`), +0.067 (95% interval -0.021 to +0.156). No measurable difference.
+  - Against `vector` and `bm25` alone on the reworded wording, it's ahead too (+0.067 and +0.043), but neither difference is measurable.
+- Fusion found fewer extra answers than the different misses promised: `hybrid_bm25` still misses 9 reworded questions in the top 5, against 11 for each side alone.
 
 ### What changed since the pilot
 
@@ -235,6 +243,7 @@ The [pilot](docs/reports/step0-results.md) marked results by page and showed `hy
 | `python -m src.evals.retrieval_eval run --mode hybrid --baseline RUN_ID` | Scores and compares with an earlier run |
 | `python -m src.evals.retrieval_eval run --mode vector --wording reworded` | Scores with the reworded questions |
 | `python -m src.evals.retrieval_eval run --mode bm25` | Scores BM25, with no API call |
+| `python -m src.evals.retrieval_eval run --mode hybrid_bm25` | Scores `vector` plus BM25 |
 
 Replace `RUN_ID` with the ID that an earlier run printed. `run` needs committed code.
 

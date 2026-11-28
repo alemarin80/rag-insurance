@@ -8,7 +8,7 @@ Evaluation comes first. Each step changes one thing and logs one result.
 | 1 | BM25 alone, using `bm25s` with a Norwegian stemmer ([spec](specs/step1-bm25.md)). Done: level with `vector` on reworded questions, misses different ones | No |
 | 2 | Sentence chunking (spaCy Norwegian), chunks allowed to cross pages | All chunks |
 | 3 | Exact duplicate chunks stored once, with every source page | All chunks |
-| 4 | Hybrid with Reciprocal Rank Fusion (BM25 and dense) | No |
+| 4 | Hybrid with Reciprocal Rank Fusion (BM25 and dense) ([spec](specs/step4-hybrid-bm25.md)). Done: `hybrid_bm25`, ahead of `hybrid` on both wordings, measurable only on the original | No |
 | 5 | Reranker on the top 20 | No |
 | 6 | Generation evaluation, with about 15 hand-graded answers | No |
 | End | Score the `test` questions once | Queries, once |
