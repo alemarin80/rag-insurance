@@ -24,6 +24,7 @@ def env(monkeypatch, tmp_path):
         ("RUNS_LOG", "runs.jsonl"),
         ("RUNS_DIR", "runs"),
         ("PDF_DIR", "pdfs"),
+        ("CHUNKS_DIR", "chunks"),
     ):
         monkeypatch.setattr(ev, name, tmp_path / file)
     llm = MagicMock(side_effect=lambda *a, **k: ev.Question(question=f"spm {llm.call_count}?"))
@@ -38,7 +39,9 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(ev, "embed_query", embed)
     monkeypatch.setattr(ev, "search", MagicMock(return_value=found))
     monkeypatch.setattr(ev, "git_state", lambda: ("abc123", []))
-    return SimpleNamespace(llm=llm, embed=embed)
+    snapshot = MagicMock(side_effect=lambda h: ev.CHUNKS_DIR / f"{h}.jsonl")
+    monkeypatch.setattr(ev, "save_chunk_snapshot", snapshot)
+    return SimpleNamespace(llm=llm, embed=embed, snapshot=snapshot)
 
 
 def make_questions(n=4, split="dev"):
@@ -242,3 +245,10 @@ def test_run_hybrid_bm25_logs_both_settings(env, monkeypatch):
     assert env.embed.call_count == 4
     assert record["bm25"] == ev.bm25.SETTINGS
     assert record["rrf"] == {"k": 60, "candidates": 30}
+
+
+def test_run_points_to_the_chunk_snapshot(env):
+    make_questions()
+    record = ev.run("vector")
+    env.snapshot.assert_called_once_with(record["chunks_sha256"])
+    assert record["chunks_file"].endswith(f"{record['chunks_sha256']}.jsonl")

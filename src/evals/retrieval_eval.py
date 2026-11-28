@@ -39,6 +39,7 @@ QUESTIONS_PATH = Path("data/retrieval_eval.jsonl")
 EMBEDDINGS_PATH = Path("data/query_embeddings.jsonl")
 RUNS_LOG = Path("results/retrieval_runs.jsonl")
 RUNS_DIR = Path("results/runs")
+CHUNKS_DIR = Path("results/chunks")
 PDF_DIR = Path("data/policies")
 
 SEED = 42
@@ -96,6 +97,19 @@ def load_chunks() -> list[dict]:
             "ORDER BY doc_name, page_number, chunk_index;"
         ).fetchall()
     return [dict(zip(("doc_name", "page_number", "chunk_index", "content"), r)) for r in rows]
+
+
+def save_chunk_snapshot(chunks_hash: str) -> Path:
+    """Save every chunk with its id once per chunk set, so run files can be read after re-chunking."""
+    path = CHUNKS_DIR / f"{chunks_hash}.jsonl"
+    if not path.exists():
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, doc_name, page_number, chunk_index, content FROM chunks ORDER BY id;"
+            ).fetchall()
+        keys = ("id", "doc_name", "page_number", "chunk_index", "content")
+        write_jsonl(path, [dict(zip(keys, r)) for r in rows])
+    return path
 
 
 def page_id(chunk: dict) -> str:
@@ -389,6 +403,8 @@ def run(
             "db_ms": round(db_ms, 1),
         })
 
+    chunks_hash = sha256(json.dumps(chunks, ensure_ascii=False).encode())
+    chunks_file = save_chunk_snapshot(chunks_hash)
     now = datetime.now(timezone.utc)
     run_id = f"{now:%Y%m%dT%H%M%S%fZ}-{mode}-{split}" + ("-reworded" if wording == "reworded" else "")
     by_type = {t: [r for r in results if r["type"] == t] for t in STYLES}
@@ -413,7 +429,8 @@ def run(
         "db_ms": time_stats([r["db_ms"] for r in results]),
         "embed_ms": time_stats([embeddings[t][1] for t in texts.values()]) if embeddings else None,
         "pdf_sha256": {p.name: sha256(p.read_bytes()) for p in sorted(PDF_DIR.glob("*.pdf"))},
-        "chunks_sha256": sha256(json.dumps(chunks, ensure_ascii=False).encode()),
+        "chunks_sha256": chunks_hash,
+        "chunks_file": chunks_file.as_posix(),
         "chunk_count": len(chunks),
         "packages": {name: version(name) for name in PACKAGES + (BM25_PACKAGES if uses_bm25 else ())},
     }

@@ -148,3 +148,13 @@ Many questions repeat the policy text, which flatters word search. 20 of the 35 
 - The question hash covers the text used, so a comparison across wordings fails. The run line stores `wording`.
 - Both wordings get scored. The gap shows how much the repeated words help each method.
 
+
+
+## Chunk snapshots
+
+Status: approved 2026-11-28.
+
+Run files store chunk ids, not chunk text. Re-chunking replaces the chunks and their ids, so the ids of older runs would point to nothing.
+
+- `run` saves all chunks once per chunk set to `results/chunks/CHUNKS_SHA256.jsonl`, committed: id, document, page, chunk index and text. `CHUNKS_SHA256` is the run's `chunks_sha256`.
+- The run line stores the file path as `chunks_file`. Runs without it used the same chunk set as the first snapshot if their `chunks_sha256` matches its name.
