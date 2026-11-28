@@ -8,7 +8,7 @@ This repository doesn't include a web UI, authentication, or the policy PDFs.
 
 The pipeline has four parts:
 
-- **Storage and retrieval** (`src/ingestion/`, `src/retrieval/`): PostgreSQL 16 with `pgvector` stores 768-dimension `gemini-embedding-2-preview` embeddings in an HNSW (Hierarchical Navigable Small World) index. A GIN (Generalized Inverted Index) over `to_tsvector('norwegian', ...)` provides keyword search. Reciprocal Rank Fusion (RRF) merges both result lists.
+- **Storage and retrieval** (`src/ingestion/`, `src/retrieval/`): PostgreSQL 16 with `pgvector` stores 768-dimension `gemini-embedding-2-preview` embeddings in an HNSW (Hierarchical Navigable Small World) index. A GIN (Generalized Inverted Index) over `to_tsvector('norwegian', ...)` provides PostgreSQL keyword search. `hybrid` merges the vector and keyword result lists with Reciprocal Rank Fusion (RRF). BM25 (`src/retrieval/bm25.py`) is a separate word search in memory, used so far only by the retrieval evaluation.
 - **Grounded generation** (`src/generation/rag.py`): `ask()` retrieves the top chunks, then the configured LLM returns a Pydantic-validated answer with `[doc_name, page_number, quote]` citations. It refuses when the retrieved excerpts don't answer the question.
 - **Automated evaluation** (`src/evals/run_eval.py`): A question simulator generates a fixed Norwegian question set in `data/eval_set.json`. The set covers exact clause lookups, informal customer scenarios, exclusion edge cases, and unanswerable trap questions. An LLM judge scores faithfulness and relevance, and every run is logged to the `eval_logs` table. A second script, `src/evals/simulate_users.py` (`python -m src.evals.simulate_users`), plays three simulated policyholders in two-turn conversations through `ask()` and logs their ratings to `user_feedback`.
 - **API and feedback** (`src/api/app.py`): A FastAPI service with `/health`, `/ask`, and `/feedback`. `/feedback` stores thumbs-up or thumbs-down ratings in the `user_feedback` table. The `source` column marks each row as `real` (from the API) or `simulated` (from `simulate_users`).
@@ -20,8 +20,8 @@ The top row is the pipeline. The blue row is the simulation and evaluation scrip
 ## Design choices
 
 - **Chunking:** 1,200-character windows with 200-character overlap, cut by character count, so a chunk can start or end mid-sentence.
-- **Hybrid retrieval:** The vector side and the keyword side each return 30 candidates. RRF scores each chunk as the sum of `1 / (60 + rank)` over both lists, and the top 5 go to the generator.
-- **Keyword query:** The keyword side uses `plainto_tsquery`, which requires every query term to match. On the retrieval questions it matched 2 of 53, so the ranking comes almost only from the vector side (see [Search methods](#search-methods)).
+- **Hybrid retrieval:** The vector side and the PostgreSQL keyword side each return 30 candidates. RRF scores each chunk as the sum of `1 / (60 + rank)` over both lists, and the top 5 go to the generator.
+- **Keyword query:** The keyword side uses `plainto_tsquery`, which requires every query word to match, after stemming and without stop words. On the retrieval questions it matched 2 of 53, so the ranking comes almost only from the vector side (see [Search methods](#search-methods)).
 - **No reranker:** The pipeline passes the top 5 chunks straight to the generator.
 - **Embeddings:** Always Gemini at 768 dimensions, so the vector index doesn't change when you switch the generator or the judge.
 
@@ -183,7 +183,7 @@ The project has two different word searches. BM25 doesn't use the PostgreSQL key
 | Method | How it searches | Used in |
 | :--- | :--- | :--- |
 | `vector` | By meaning: cosine similarity of the question and chunk embeddings | `--mode vector`, the API |
-| `hybrid` | `vector` plus PostgreSQL keyword search (`plainto_tsquery`), merged with RRF. A chunk matches the keyword side only if it contains every word of the question | `--mode hybrid`, the API default, `run_eval` |
+| `hybrid` | `vector` plus PostgreSQL keyword search (`plainto_tsquery`), merged with RRF. A chunk matches the keyword side only if it contains every word of the question, after stemming and without stop words | `--mode hybrid`, the API default, `run_eval` |
 | `bm25` | BM25 in memory (`src/retrieval/bm25.py`). Every chunk gets a score for each question word it contains, weighted by how rare the word is | `--mode bm25` only |
 
 The PostgreSQL keyword search matches almost nothing: 2 of the 53 `dev` questions in the original wording, and 1 in the reworded wording. Today's `hybrid` is therefore close to `vector` alone. It stays as the baseline that a `hybrid` with BM25 instead (step 4) must beat.
@@ -206,7 +206,7 @@ The following table shows scorer version 2 on 53 `dev` questions:
 | `bm25` | reworded | 0.547 | 0.792 | 0.887 | 0.661 | 0.686 |
 
 - On the original wording, `hybrid` scored better on 1 question and worse on none. The difference on nDCG@5 is +0.011 (95% interval 0.000 to +0.032), which is no measurable difference.
-- On the reworded wording, `hybrid` and `vector` score the same on every question. The keyword side of `hybrid` needs every word of the question in the chunk, and a reworded question doesn't have that.
+- On the reworded wording, `hybrid` and `vector` score the same on every question. The keyword side matches only `q092`, and that match doesn't change its rank.
 - Rewording made `vector` worse on 8 questions and better on 1. The reworded numbers are the baseline for later steps; the original ones show how much copied words help.
 - `bm25` (step 1, [spec](docs/specs/step1-bm25.md)) is BM25 word search with Norwegian stemming. On the original wording it leads `vector` on every metric: 16 questions better, 9 worse, nDCG@5 +0.104 (95% interval -0.008 to +0.213). The interval includes 0, so this is no measurable difference, and the copied words favor `bm25`.
 - On the reworded wording, `bm25` and `vector` are level: 16 questions better, 13 worse, nDCG@5 +0.024 (95% interval -0.106 to +0.154). `bm25` finds the answer in the top 20 less often (0.887 against 0.943).
