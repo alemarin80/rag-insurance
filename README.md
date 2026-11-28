@@ -178,14 +178,20 @@ A retrieved chunk is correct if it contains the question's answer sentence, whic
 
 ### Results
 
+Many questions repeat the policy text word for word, which flatters word search. Each question that repeats 4 or more words in a row from its source chunk also has a reworded version, with the same answer sentence: 23 of the 53 `dev` questions. "Original" uses the questions as generated, "reworded" uses the reworded version where one exists.
+
 The following table shows scorer version 2 on 53 `dev` questions:
 
-| Method | Hit@1 | Hit@5 | Hit@20 | MRR@20 | nDCG@5 |
-| :--- | ---: | ---: | ---: | ---: | ---: |
-| `vector` | 0.623 | 0.830 | 0.962 | 0.707 | 0.726 |
-| `hybrid` | 0.641 | 0.830 | 0.962 | 0.721 | 0.737 |
+| Method | Wording | Hit@1 | Hit@5 | Hit@20 | MRR@20 | nDCG@5 |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+| `vector` | original | 0.623 | 0.830 | 0.962 | 0.707 | 0.726 |
+| `hybrid` | original | 0.641 | 0.830 | 0.962 | 0.721 | 0.737 |
+| `vector` | reworded | 0.528 | 0.792 | 0.943 | 0.633 | 0.662 |
+| `hybrid` | reworded | 0.528 | 0.792 | 0.943 | 0.633 | 0.662 |
 
-`hybrid` scored better on 1 question and worse on none. The difference on nDCG@5 is +0.011 (95% interval 0.000 to +0.032), which is no measurable difference.
+- On the original wording, `hybrid` scored better on 1 question and worse on none. The difference on nDCG@5 is +0.011 (95% interval 0.000 to +0.032), which is no measurable difference.
+- On the reworded wording, `hybrid` and `vector` score the same on every question. The keyword side of `hybrid` needs every word of the question in the chunk, and a reworded question doesn't have that.
+- Rewording made `vector` worse on 8 questions and better on 1. The reworded numbers are the baseline for later steps; the original ones show how much copied words help.
 
 ### What changed since the pilot
 
@@ -196,7 +202,7 @@ The [pilot](docs/reports/step0-results.md) marked results by page and showed `hy
 - Some questions don't name the insurance, and policies give different amounts. Only the source policy's sentence counts. For example, `q064` and `q088` ask about the same theft limit, and the correct amount differs between two home policies.
 - The same sentence with a small difference in wording counts as wrong.
 - An AI assistant picked the answer sentences and checked most `test` questions. The `dev` questions aren't hand-checked.
-- The questions come from the policy text, so real questions are probably harder.
+- The questions come from the policy text, so real questions are probably harder. An AI assistant wrote the reworded questions, so they aren't real user questions either.
 - With 53 questions, only large differences are measurable.
 - Source chunks were picked with a fixed seed, evenly across the 5 PDFs, but without a minimum length. Some were page tails that answer nothing; 4 such questions were dropped.
 
@@ -208,6 +214,7 @@ The [pilot](docs/reports/step0-results.md) marked results by page and showed `hy
 | `python -m src.evals.retrieval_eval check` | Hand-checks the `test` questions |
 | `python -m src.evals.retrieval_eval run --mode vector` | Scores `vector` on `dev` and logs the run |
 | `python -m src.evals.retrieval_eval run --mode hybrid --baseline RUN_ID` | Scores and compares with an earlier run |
+| `python -m src.evals.retrieval_eval run --mode vector --wording reworded` | Scores with the reworded questions |
 
 Replace `RUN_ID` with the ID that an earlier run printed. `run` needs committed code.
 
