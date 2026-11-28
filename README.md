@@ -170,61 +170,6 @@ To check that each provider and model works, run the live smoke test. It costs a
 python -m tests.smoke_llm --e2e
 ```
 
-## How the evaluation works
-
-The command `python -m src.evals.run_eval` runs three stages:
-
-1. **Generate questions.** If `data/eval_set.json` doesn't exist, a simulator LLM writes a question set and saves it there. Later runs reuse the file, so every run and every model you try answers the same questions.
-1. **Retrieve and answer.** For each question, the pipeline runs once per retrieval mode (`vector`, then `hybrid`). The mode only changes how `src/retrieval/search.py` picks the top 5 chunks. The generator LLM then answers from those chunks.
-1. **Judge.** A separate judge LLM scores each answer. It receives the question, the answer, the answer's `is_covered_in_context` flag, and the retrieved chunks. It doesn't receive the retrieval mode or the source page of the question. It does know whether the question is a trap. The script writes each result to `eval_logs`, with the mode, the generator and judge model names and effort, the retrieved pages, whether the expected page was among them, and the generator's token counts. Output tokens include reasoning tokens.
-
-### Question generation
-
-The simulator writes 18 questions: 15 from policy text and 3 fixed trap questions. To write the 15, it does the following for each of three question types:
-
-1. Pick 5 random chunks from the `chunks` table (`ORDER BY RANDOM()`).
-1. Send each chunk and the instruction for that type to the simulator LLM (`SIM_PROVIDER`, `SIM_MODEL`, temperature 0.7 where the model accepts one: `gpt-5*` models ignore it). The LLM returns one Norwegian question as structured output.
-1. Store the question with `expected_source`, the `document#page` of the chunk it came from.
-
-The three draws are independent, so one chunk can produce questions of different types, and a PDF with more chunks tends to get more questions.
-
-The following table lists the question types:
-
-| Type | Count | Instruction to the simulator |
-| :--- | :---: | :--- |
-| `exact_lookup` | 5 | Ask for an exact number, age, day limit, amount, or clause condition, without copying the surrounding sentence. |
-| `messy_user` | 5 | Write an informal, vague, real-life scenario from a stressed customer, without insurance jargon. |
-| `exclusion_edge` | 5 | Ask whether a specific exception or limitation applies. |
-| `trap` | 3 | Fixed, hand-written questions that the policies don't answer, such as crypto fraud or dog dental care. `expected_source` is `NONE`. |
-
-### What the scores measure
-
-The run prints three scores per retrieval mode:
-
-- **Recall@5** (recall at 5, answerable questions only): 1 if the `expected_source` page is among the 5 retrieved chunks, otherwise 0. It measures retrieval alone, with no generator or judge model involved.
-- **Faithfulness** (judge, 0 to 1): 1 if no claim goes beyond the retrieved chunks. The judge has no faithfulness rule for the 3 trap questions, but their scores are still in the average over all 18 questions.
-- **Relevance** (judge, 0 to 1): 1 if the answer addresses the question. For a trap question, 1 only if the bot refused.
-
-### Find the retrieval misses
-
-`run_eval` prints each miss with the expected page and the pages it retrieved. The same data stays in `eval_logs`, so you can inspect a miss without a new run:
-
-```bash
-docker exec insurance_rag_db psql -U rag -d insurance_rag -c "SELECT question, expected_source, retrieved FROM eval_logs WHERE retrieval_hit = false ORDER BY id DESC;"
-```
-
-### Known weaknesses
-
-The design has these limits:
-
-- Each question comes from one chunk, so the set has no questions that need several policies or tables.
-- Recall@5 matches the exact page. A question that another page answers equally well counts as a miss.
-- The judge has no reference answer. It checks the answer against the retrieved chunks only, so an answer grounded in the wrong chunks can still score high.
-- The scores are LLM estimates. This repository doesn't validate them against human grades.
-- The simulator sees the chunk, so a question can echo its wording and make retrieval look easier than it is for real customers.
-
-To change the question mix, edit `styles` and `n_per_type` in `generate_eval_set()` in `src/evals/run_eval.py`. Then run `python -m src.ops.data reset eval_set` (see [Reset](#reset)).
-
 ## Improving retrieval
 
 The goal is the process: change one thing, measure it, and write down what the measurement can't tell. Evaluation flaws are fixed in a new scorer version, and numbers are compared only within one version. The `test` questions stay unscored until the final comparison. For the order of work, see the [plan](docs/plan.md).
@@ -253,6 +198,7 @@ The [pilot](docs/reports/step0-results.md) marked results by page and showed `hy
 - An AI assistant picked the answer sentences and checked most `test` questions. The `dev` questions aren't hand-checked.
 - The questions come from the policy text, so real questions are probably harder.
 - With 53 questions, only large differences are measurable.
+- Source chunks were picked with a fixed seed, evenly across the 5 PDFs, but without a minimum length. Some were page tails that answer nothing; 4 such questions were dropped.
 
 ### Run it
 
@@ -265,20 +211,23 @@ The [pilot](docs/reports/step0-results.md) marked results by page and showed `hy
 
 Replace `RUN_ID` with the ID that an earlier run printed. `run` needs committed code.
 
-## Benchmark results
+## Old end-to-end evaluation
 
-The following table compares retrieval modes on 18 Norwegian questions: 15 written from the policy chunks and 3 unanswerable trap questions. The corpus is 5 policy PDFs, split into 209 chunks. `gpt-5-mini` generated the answers, `gemini-4-hydrogen` judged them, and `gpt-5-nano` wrote the questions.
+`python -m src.evals.run_eval` scores whole answers, not search alone. A simulator LLM wrote 18 questions in `data/eval_set.json`: 15 from randomly drawn chunks and 3 trap questions that the policies don't answer. For each retrieval mode, the generator answers from the top 5 chunks, and a judge LLM scores faithfulness and relevance. Results, latency and tokens go to the `eval_logs` table. Step 6 of the [plan](docs/plan.md) replaces it.
 
 | Mode | Recall@5 | Faithfulness | Relevance | Average latency |
 | :--- | :---: | :---: | :---: | :---: |
 | `vector` | 0.80 | 0.99 | 0.98 | 15,988 ms |
 | `hybrid` (RRF) | 0.80 | 0.97 | 0.96 | 13,678 ms |
 
-One question changes Recall@5 by 0.07 (1 of 15) and the judge scores by about 0.06 (1 of 18), so the two modes don't differ in any way this set can measure. The identical Recall@5 may have a cause besides equal quality: the keyword side of `hybrid` requires every query term to match (see [Design choices](#design-choices)), so on full questions `hybrid` may behave like `vector`. In the retrieval-only pilot, the keyword side matched 2 of 60 questions (see [Improving retrieval](#improving-retrieval)).
+`gpt-5-mini` answered, `gemini-4-hydrogen` judged and `gpt-5-nano` wrote the questions. One question changes Recall@5 by 0.07, so the modes don't differ measurably. At `LLM_EFFORT=low` (now the default), `vector` took 7,542 ms per answer, with about 1,700 input and 550 output tokens. The `hybrid` re-run stopped with a 429 error: the Gemini judge hit its spending cap.
 
-The table above used the default reasoning effort, where `gpt-5-mini` takes 14 to 16 seconds per answer. A new run of `vector` at `LLM_EFFORT=low` (now the default) gave Recall@5 0.80, faithfulness 1.00, relevance 0.99, an average latency of 7,542 ms, and about 1,700 input and 550 output generator tokens per answer. The `hybrid` re-run didn't finish: the Gemini judge returned a 429 error because the project hit its monthly spending cap. The three misses of that run are in `eval_logs`. Gemini with `thinking_level="low"` answered in 3 to 4 seconds in earlier runs on a smaller, partly ingested corpus, so treat that comparison as unverified.
+Its flaws:
 
-Run `python -m src.evals.run_eval` to reproduce the table with your own `.env` settings. The numbers change when you regenerate the questions, because the simulator's output varies.
+- The chunks are drawn with `ORDER BY RANDOM()`: no seed, larger PDFs get more questions, and a page tail of a few characters can be drawn. The retrieval evaluation doesn't use this draw.
+- Recall@5 counts only the exact source page, the flaw that scorer version 2 fixed.
+- 15 answerable questions measure only very large differences.
+- The judge has no reference answer, and its scores aren't checked against human grades.
 
 ## Next steps
 
