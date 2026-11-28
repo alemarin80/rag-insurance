@@ -5,3 +5,5 @@ __pycache__/
 env
 data/policies/*.pdf
 TODO.md
+# Private notes for Claude Code. Never commit.
+CLAUDE.local.md

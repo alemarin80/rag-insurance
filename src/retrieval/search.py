@@ -38,9 +38,14 @@ def embed_query(query: str) -> list[float]:
     return res.embeddings[0].values
 
 
-def search(query: str, mode: str = "hybrid", top_k: int = 5) -> list[RetrievedChunk]:
-    """Retrieve top_k relevant policy chunks using 'vector' or 'hybrid' (RRF) mode."""
-    q_vec = embed_query(query)
+def search(
+    query: str, mode: str = "hybrid", top_k: int = 5, query_vector: list[float] | None = None
+) -> list[RetrievedChunk]:
+    """Retrieve top_k relevant policy chunks using 'vector' or 'hybrid' (RRF) mode.
+
+    Pass query_vector to reuse a saved embedding instead of calling the API.
+    """
+    q_vec = embed_query(query) if query_vector is None else query_vector
     with get_conn() as conn:
         if mode == "vector":
             rows = conn.execute(

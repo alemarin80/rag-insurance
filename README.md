@@ -225,6 +225,46 @@ The design has these limits:
 
 To change the question mix, edit `styles` and `n_per_type` in `generate_eval_set()` in `src/evals/run_eval.py`. Then run `python -m src.ops.data reset eval_set` (see [Reset](#reset)).
 
+## Improving retrieval
+
+The goal is the process: change one thing, measure it, and write down what the measurement can't tell. Evaluation flaws are fixed in a new scorer version, and numbers are compared only within one version. The `test` questions stay unscored until the final comparison. For the order of work, see the [plan](docs/plan.md).
+
+A retrieved chunk is correct if it contains the question's answer sentence, whichever document it comes from (scorer version 2, see the [spec](docs/specs/step0-retrieval-eval.md)).
+
+### Results
+
+The following table shows scorer version 2 on 53 `dev` questions:
+
+| Method | Hit@1 | Hit@5 | Hit@20 | MRR@20 | nDCG@5 |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| `vector` | 0.623 | 0.830 | 0.962 | 0.707 | 0.726 |
+| `hybrid` | 0.641 | 0.830 | 0.962 | 0.721 | 0.737 |
+
+`hybrid` scored better on 1 question and worse on none. The difference on nDCG@5 is +0.011 (95% interval 0.000 to +0.032), which is no measurable difference.
+
+### What changed since the pilot
+
+The [pilot](docs/reports/step0-results.md) marked results by page and showed `hybrid` ahead. Part of that lead came from identical chunks that tie and appear in arbitrary order. Pages that answered a question could also be marked wrong. Version 2 marks by text, so identical chunks always get the same mark. It also drops questions made from the same text and questions their source text can't answer.
+
+### Known flaws
+
+- Some questions don't name the insurance, and policies give different amounts. Only the source policy's sentence counts. For example, `q064` and `q088` ask about the same theft limit, and the correct amount differs between two home policies.
+- The same sentence with a small difference in wording counts as wrong.
+- An AI assistant picked the answer sentences and checked most `test` questions. The `dev` questions aren't hand-checked.
+- The questions come from the policy text, so real questions are probably harder.
+- With 53 questions, only large differences are measurable.
+
+### Run it
+
+| Command | Does |
+| :--- | :--- |
+| `python -m src.evals.retrieval_eval generate` | Writes the question file, once (paid LLM calls). New questions need an `answer` field before scoring |
+| `python -m src.evals.retrieval_eval check` | Hand-checks the `test` questions |
+| `python -m src.evals.retrieval_eval run --mode vector` | Scores `vector` on `dev` and logs the run |
+| `python -m src.evals.retrieval_eval run --mode hybrid --baseline RUN_ID` | Scores and compares with an earlier run |
+
+Replace `RUN_ID` with the ID that an earlier run printed. `run` needs committed code.
+
 ## Benchmark results
 
 The following table compares retrieval modes on 18 Norwegian questions: 15 written from the policy chunks and 3 unanswerable trap questions. The corpus is 5 policy PDFs, split into 209 chunks. `gpt-5-mini` generated the answers, `gemini-4-hydrogen` judged them, and `gpt-5-nano` wrote the questions.
@@ -234,7 +274,7 @@ The following table compares retrieval modes on 18 Norwegian questions: 15 writt
 | `vector` | 0.80 | 0.99 | 0.98 | 15,988 ms |
 | `hybrid` (RRF) | 0.80 | 0.97 | 0.96 | 13,678 ms |
 
-One question changes Recall@5 by 0.07 (1 of 15) and the judge scores by about 0.06 (1 of 18), so the two modes don't differ in any way this set can measure. The identical Recall@5 may have a cause besides equal quality: the keyword side of `hybrid` requires every query term to match (see [Design choices](#design-choices)), so on full questions `hybrid` may behave like `vector`. This repository hasn't tested that.
+One question changes Recall@5 by 0.07 (1 of 15) and the judge scores by about 0.06 (1 of 18), so the two modes don't differ in any way this set can measure. The identical Recall@5 may have a cause besides equal quality: the keyword side of `hybrid` requires every query term to match (see [Design choices](#design-choices)), so on full questions `hybrid` may behave like `vector`. In the retrieval-only pilot, the keyword side matched 2 of 60 questions (see [Improving retrieval](#improving-retrieval)).
 
 The table above used the default reasoning effort, where `gpt-5-mini` takes 14 to 16 seconds per answer. A new run of `vector` at `LLM_EFFORT=low` (now the default) gave Recall@5 0.80, faithfulness 1.00, relevance 0.99, an average latency of 7,542 ms, and about 1,700 input and 550 output generator tokens per answer. The `hybrid` re-run didn't finish: the Gemini judge returned a 429 error because the project hit its monthly spending cap. The three misses of that run are in `eval_logs`. Gemini with `thinking_level="low"` answered in 3 to 4 seconds in earlier runs on a smaller, partly ingested corpus, so treat that comparison as unverified.
 
@@ -242,10 +282,5 @@ Run `python -m src.evals.run_eval` to reproduce the table with your own `.env` s
 
 ## Next steps
 
-To make the comparison meaningful, work in this order:
-
-1. Test the keyword query: replace `plainto_tsquery` with `websearch_to_tsquery` or an OR query, and re-run the benchmark.
-2. Grow the eval set beyond 18 questions, with multi-policy and table-heavy questions.
-3. Hand-grade about 15 answers and compare them with the judge's scores.
-4. If Recall@5 stays at 0.80, try a larger `top_k` or add a reranker.
-5. Add a streaming endpoint. The answer is structured JSON (`answer`, `citations`, `is_covered_in_context`), so a half-written answer can't be shown as it arrives. One option is to send the retrieved sources first and the final JSON last. Real token streaming needs a prompt that writes the plain answer before the citations.
+- Follow the [retrieval improvement plan](docs/plan.md).
+- Add a streaming endpoint. The answer is structured JSON (`answer`, `citations`, `is_covered_in_context`), so a half-written answer can't be shown as it arrives. One option is to send the retrieved sources first and the final JSON last. Real token streaming needs a prompt that writes the plain answer before the citations.
