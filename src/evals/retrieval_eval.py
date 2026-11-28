@@ -9,7 +9,7 @@ Usage:
     python -m src.evals.retrieval_eval generate
     python -m src.evals.retrieval_eval check [--split test|dev|all]
     python -m src.evals.retrieval_eval run --mode vector|hybrid [--split dev|test]
-        [--baseline RUN_ID] [--allow-dirty]
+        [--wording original|reworded] [--baseline RUN_ID] [--allow-dirty]
 """
 
 import argparse
@@ -17,6 +17,7 @@ import hashlib
 import json
 import math
 import random
+import re
 import statistics
 import subprocess
 import sys
@@ -45,6 +46,7 @@ TEST_PER_TYPE = 10
 TOP_K = 20
 BOOTSTRAP_SAMPLES = 10_000
 SCORER = 2
+COPY_WORDS = 4  # a reworded question may not repeat this many source words in a row
 METRICS = ("hit@1", "hit@5", "hit@20", "mrr@20", "ndcg@5")
 PACKAGES = ("google-genai", "pgvector", "psycopg", "pymupdf")
 
@@ -223,6 +225,26 @@ def check(split: str = "test") -> None:
     print(f"\nNo unchecked questions left in split '{split}'.")
 
 
+# --- wording ---
+
+def copies_source(question: str, source: str, n: int = COPY_WORDS) -> bool:
+    """Check whether the question repeats n or more words in a row from the source text."""
+    def words(text: str) -> list[str]:
+        return re.findall(r"\w+", text.lower())
+
+    src = words(source)
+    runs = {tuple(src[i:i + n]) for i in range(len(src) - n + 1)}
+    q = words(question)
+    return any(tuple(q[i:i + n]) in runs for i in range(len(q) - n + 1))
+
+
+def question_text(question: dict, wording: str) -> str:
+    """Return the text to search with: the reworded one if asked for and present."""
+    if wording == "reworded":
+        return question.get("reworded") or question["question"]
+    return question["question"]
+
+
 # --- metrics ---
 
 def normalize(text: str) -> str:
@@ -291,15 +313,14 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def get_embeddings(questions: list[dict]) -> dict[str, tuple[list[float], float]]:
-    """Return {question: (vector, ms)}, calling the API only for questions not saved yet."""
+def get_embeddings(texts: list[str]) -> dict[str, tuple[list[float], float]]:
+    """Return {question text: (vector, ms)}, calling the API only for texts not saved yet."""
     saved = {
         r["question"]: (r["vector"], r["ms"])
         for r in read_jsonl(EMBEDDINGS_PATH)
         if (r["model"], r["dim"]) == (EMBED_MODEL, EMBED_DIM)
     }
-    for q in questions:
-        text = q["question"]
+    for text in texts:
         if text in saved:
             continue
         t0 = time.perf_counter()
@@ -310,7 +331,9 @@ def get_embeddings(questions: list[dict]) -> dict[str, tuple[list[float], float]
     return saved
 
 
-def run(mode: str, split: str = "dev", baseline: str | None = None, allow_dirty: bool = False) -> dict:
+def run(
+    mode: str, split: str = "dev", baseline: str | None = None, allow_dirty: bool = False, wording: str = "original"
+) -> dict:
     commit, changed = git_state()
     if changed and not allow_dirty:
         raise SystemExit("Uncommitted changes (commit them or pass --allow-dirty):\n  " + "\n  ".join(changed))
@@ -323,7 +346,14 @@ def run(mode: str, split: str = "dev", baseline: str | None = None, allow_dirty:
     unchecked = sum(not q["checked"] for q in questions)
     if unchecked:
         print(f"Warning: {unchecked} of {len(questions)} questions in '{split}' are not hand-checked.")
-    used = [[q["id"], q["question"], q["answer"]] for q in questions]
+    chunks = load_chunks()
+    texts = {q["id"]: question_text(q, wording) for q in questions}
+    if wording == "reworded":
+        pages = group_by_page(chunks)
+        copying = [q["id"] for q in questions if q.get("reworded") and copies_source(q["reworded"], source_text(q, pages) or "")]
+        if copying:
+            raise SystemExit(f"Reworded text repeats {COPY_WORDS}+ source words for: " + ", ".join(copying))
+    used = [[q["id"], texts[q["id"]], q["answer"]] for q in questions]
     questions_hash = sha256(json.dumps(used, ensure_ascii=False).encode())
 
     base = None
@@ -334,13 +364,12 @@ def run(mode: str, split: str = "dev", baseline: str | None = None, allow_dirty:
         if (base["questions_hash"], base["split"]) != (questions_hash, split):
             raise SystemExit("The baseline used different questions or another split.")
 
-    chunks = load_chunks()
-    embeddings = get_embeddings(questions)
+    embeddings = get_embeddings(list(texts.values()))
     results = []
     for q in questions:
-        vector, _ = embeddings[q["question"]]
+        vector, _ = embeddings[texts[q["id"]]]
         t0 = time.perf_counter()
-        found = search(q["question"], mode=mode, top_k=TOP_K, query_vector=vector)
+        found = search(texts[q["id"]], mode=mode, top_k=TOP_K, query_vector=vector)
         db_ms = (time.perf_counter() - t0) * 1000
         correct = [contains_answer(c.content, q["answer"]) for c in found]
         results.append({
@@ -356,7 +385,7 @@ def run(mode: str, split: str = "dev", baseline: str | None = None, allow_dirty:
         })
 
     now = datetime.now(timezone.utc)
-    run_id = f"{now:%Y%m%dT%H%M%S%fZ}-{mode}-{split}"
+    run_id = f"{now:%Y%m%dT%H%M%S%fZ}-{mode}-{split}" + ("-reworded" if wording == "reworded" else "")
     by_type = {t: [r for r in results if r["type"] == t] for t in STYLES}
     record = {
         "run_id": run_id,
@@ -369,12 +398,13 @@ def run(mode: str, split: str = "dev", baseline: str | None = None, allow_dirty:
         "embedding": {"model": EMBED_MODEL, "dim": EMBED_DIM},
         "questions_hash": questions_hash,
         "split": split,
+        "wording": wording,
         "questions": len(results),
         "unchecked": unchecked,
         "metrics": mean_metrics(results),
         "metrics_by_type": {t: mean_metrics(rows) for t, rows in by_type.items() if rows},
         "db_ms": time_stats([r["db_ms"] for r in results]),
-        "embed_ms": time_stats([embeddings[q["question"]][1] for q in questions]),
+        "embed_ms": time_stats([embeddings[t][1] for t in texts.values()]),
         "pdf_sha256": {p.name: sha256(p.read_bytes()) for p in sorted(PDF_DIR.glob("*.pdf"))},
         "chunks_sha256": sha256(json.dumps(chunks, ensure_ascii=False).encode()),
         "chunk_count": len(chunks),
@@ -411,6 +441,8 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("run", help="score one retrieval method")
     p.add_argument("--mode", choices=("vector", "hybrid"), required=True)
     p.add_argument("--split", choices=("dev", "test"), default="dev")
+    p.add_argument("--wording", choices=("original", "reworded"), default="original",
+                   help="search with the reworded questions where they exist")
     p.add_argument("--baseline", metavar="RUN_ID", help="compare with an earlier run")
     p.add_argument("--allow-dirty", action="store_true", help="run with uncommitted changes and mark the run")
     args = parser.parse_args(argv)
@@ -420,7 +452,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "check":
         check(args.split)
     else:
-        run(args.mode, args.split, args.baseline, args.allow_dirty)
+        run(args.mode, args.split, args.baseline, args.allow_dirty, args.wording)
 
 
 if __name__ == "__main__":

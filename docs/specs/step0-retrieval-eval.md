@@ -136,3 +136,15 @@ Version 1 marked results by page. Identical chunks in different documents tied i
 - Nine questions are dropped (`drop_reason`): five repeat another question's source text, and four can't be answered from their source text. This leaves 53 `dev` and 25 `test` questions.
 - Each run line stores `scorer`. Runs without it are version 1.
 
+## Reworded questions
+
+Status: approved 2026-11-28. Scoring is unchanged (version 2).
+
+Many questions repeat the policy text, which flatters word search. 20 of the 35 `exact_lookup` and `exclusion_edge` `dev` questions repeat 4 or more words in a row from their source chunk.
+
+- Each question that repeats 4 or more source words in a row gets a `reworded` field, with `reworded_by`. An AI assistant (Claude) wrote all of them: 23 `dev` and 12 `test`. The answer sentence stays the same.
+- Rules: same meaning, plain user language, no insurance name the original doesn't have, and no 4 words in a row from the source chunk.
+- `run --wording reworded` searches with `reworded` where it exists, and with the original elsewhere. It refuses a reworded question that repeats 4 or more source words.
+- The question hash covers the text used, so a comparison across wordings fails. The run line stores `wording`.
+- Both wordings get scored. The gap shows how much the repeated words help each method.
+

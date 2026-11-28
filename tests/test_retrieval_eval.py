@@ -188,3 +188,38 @@ def test_run_rejects_mismatched_baseline(env):
     with pytest.raises(SystemExit):
         ev.run("hybrid", baseline=base)
     assert len(ev.read_jsonl(ev.RUNS_LOG)) == 1
+
+
+# --- wording ---
+
+def test_copies_source_finds_four_words_in_a_row():
+    source = "Tyveri av sykkel registrert i FG-godkjent sykkelregister 2 000"
+    assert ev.copies_source("Hva får jeg ved tyveri av sykkel registrert der?", source)
+    assert not ev.copies_source("Hva får jeg hvis sykkelen min blir stjålet?", source)
+    assert not ev.copies_source("tyveri av sykkel", source)
+
+
+def test_run_reworded_searches_with_the_reworded_text(env):
+    rows = make_questions()
+    rows[0]["reworded"] = "ny ordlyd?"
+    ev.write_jsonl(ev.QUESTIONS_PATH, rows)
+    original = ev.run("vector")
+    reworded = ev.run("vector", wording="reworded")
+    assert ev.search.call_args_list[4].args[0] == "ny ordlyd?"
+    assert ev.search.call_args_list[5].args[0] == "spm 1?"
+    assert (original["wording"], reworded["wording"]) == ("original", "reworded")
+    assert reworded["run_id"].endswith("-reworded")
+    assert original["questions_hash"] != reworded["questions_hash"]
+    with pytest.raises(SystemExit):
+        ev.run("vector", wording="reworded", baseline=original["run_id"])
+
+
+def test_run_rejects_a_reworded_question_that_copies_the_source(env, monkeypatch):
+    chunks = [dict(CHUNKS[0], content="egenandelen er 4 000 kroner"), *CHUNKS[1:]]
+    monkeypatch.setattr(ev, "load_chunks", lambda: chunks)
+    rows = make_questions()
+    rows[0]["reworded"] = "er egenandelen er 4 000 nå?"
+    ev.write_jsonl(ev.QUESTIONS_PATH, rows)
+    with pytest.raises(SystemExit):
+        ev.run("vector", wording="reworded")
+    assert env.embed.call_count == 0
