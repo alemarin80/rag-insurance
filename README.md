@@ -21,7 +21,7 @@ The top row is the pipeline. The blue row is the simulation and evaluation scrip
 
 - **Chunking:** 1,200-character windows with 200-character overlap, cut by character count, so a chunk can start or end mid-sentence.
 - **Hybrid retrieval:** The vector side and the keyword side each return 30 candidates. RRF scores each chunk as the sum of `1 / (60 + rank)` over both lists, and the top 5 go to the generator.
-- **Keyword query:** The keyword side uses `plainto_tsquery`, which requires every query term to match. A long question can return few or no keyword rows, and then the ranking comes mostly from the vector side.
+- **Keyword query:** The keyword side uses `plainto_tsquery`, which requires every query term to match. On the retrieval questions it matched 2 of 53, so the ranking comes almost only from the vector side (see [Search methods](#search-methods)).
 - **No reranker:** The pipeline passes the top 5 chunks straight to the generator.
 - **Embeddings:** Always Gemini at 768 dimensions, so the vector index doesn't change when you switch the generator or the judge.
 
@@ -175,6 +175,20 @@ python -m tests.smoke_llm --e2e
 The goal is the process: change one thing, measure it, and write down what the measurement can't tell. Evaluation flaws are fixed in a new scorer version, and numbers are compared only within one version. The `test` questions stay unscored until the final comparison. For the order of work, see the [plan](docs/plan.md).
 
 A retrieved chunk is correct if it contains the question's answer sentence, whichever document it comes from (scorer version 2, see the [spec](docs/specs/step0-retrieval-eval.md)).
+
+### Search methods
+
+The project has two different word searches. BM25 doesn't use the PostgreSQL keyword search.
+
+| Method | How it searches | Used in |
+| :--- | :--- | :--- |
+| `vector` | By meaning: cosine similarity of the question and chunk embeddings | `--mode vector`, the API |
+| `hybrid` | `vector` plus PostgreSQL keyword search (`plainto_tsquery`), merged with RRF. A chunk matches the keyword side only if it contains every word of the question | `--mode hybrid`, the API default, `run_eval` |
+| `bm25` | BM25 in memory (`src/retrieval/bm25.py`). Every chunk gets a score for each question word it contains, weighted by how rare the word is | `--mode bm25` only |
+
+The PostgreSQL keyword search matches almost nothing: 2 of the 53 `dev` questions in the original wording, and 1 in the reworded wording. Today's `hybrid` is therefore close to `vector` alone. It stays as the baseline that a `hybrid` with BM25 instead (step 4) must beat.
+
+For example, `q043` asks `Hva er erstatningen for tyveri av sykkel registrert i FG-godkjent sykkelregister?`. Every word is in the chunk, so the keyword search matches. Its reworded version, `Hvor mye får jeg hvis sykkelen min blir stjålet og den står i et godkjent sykkelregister?`, contains words that the chunk doesn't, so the keyword search finds nothing. BM25 still scores the chunk on `sykkel` and `sykkelregister`.
 
 ### Results
 
