@@ -29,7 +29,10 @@ def env(monkeypatch, tmp_path):
     llm = MagicMock(side_effect=lambda *a, **k: ev.Question(question=f"spm {llm.call_count}?"))
     embed = MagicMock(return_value=[0.1, 0.2])
     # The fake search always ranks doc0 page 1 first.
-    found = [SimpleNamespace(doc_name="doc0.pdf", page_number=p, score=1 / p) for p in (1, 1, 2)]
+    found = [
+        SimpleNamespace(id=i, doc_name="doc0.pdf", page_number=1, score=1 / i, content=text)
+        for i, text in ((1, "Her står  Svaret."), (2, "noe annet"))
+    ]
     monkeypatch.setattr(ev, "load_chunks", lambda: CHUNKS)
     monkeypatch.setattr(ev, "generate_structured", llm)
     monkeypatch.setattr(ev, "embed_query", embed)
@@ -41,7 +44,7 @@ def env(monkeypatch, tmp_path):
 def make_questions(n=4, split="dev"):
     rows = [
         {"id": f"q{i}", "type": "messy_user", "question": f"spm {i}?", "gold_pages": ["doc0.pdf#p1"],
-         "source_chunk": 0, "split": split, "checked": True, "dropped": False}
+         "source_chunk": 0, "split": split, "checked": True, "dropped": False, "answer": "står svaret"}
         for i in range(n)
     ]
     ev.write_jsonl(ev.QUESTIONS_PATH, rows)
@@ -50,29 +53,27 @@ def make_questions(n=4, split="dev"):
 
 # --- metrics ---
 
-def test_rank_pages_counts_a_page_once_at_its_best_rank():
-    chunks = [SimpleNamespace(doc_name="a", page_number=p, score=s) for p, s in ((1, 0.9), (1, 0.8), (2, 0.7))]
-    assert ev.rank_pages(chunks) == [("a#p1", 0.9), ("a#p2", 0.7)]
+def test_contains_answer_ignores_case_and_spacing():
+    assert ev.contains_answer("Egenandelen  er\n4 000 kroner.", "egenandelen er 4 000")
+    assert not ev.contains_answer("Egenandelen er 2 000 kroner.", "egenandelen er 4 000")
 
 
 def test_score_hit_at_rank_two():
-    m = ev.score_ranking(["x", "g", "y"], ["g"])
+    m = ev.score_ranking([False, True, False])
     assert (m["hit@1"], m["hit@5"], m["mrr@20"]) == (0.0, 1.0, 0.5)
     assert m["ndcg@5"] == pytest.approx(1 / math.log2(3))
 
 
 def test_score_no_hit():
-    assert set(ev.score_ranking(["x", "y"], ["g"]).values()) == {0.0}
+    assert set(ev.score_ranking([False, False]).values()) == {0.0}
 
 
-def test_score_any_gold_page_is_enough():
-    m = ev.score_ranking(["x", "g2", "g1"], ["g1", "g2"])
-    assert (m["hit@1"], m["hit@5"], m["mrr@20"]) == (0.0, 1.0, 0.5)
-    assert m["ndcg@5"] == pytest.approx(1 / math.log2(3))
+def test_score_only_the_first_correct_result_counts():
+    assert ev.score_ranking([False, True, True]) == ev.score_ranking([False, True, False])
 
 
 def test_score_hit_below_rank_five():
-    m = ev.score_ranking([*"abcde", "g"], ["g"])
+    m = ev.score_ranking([False] * 5 + [True])
     assert (m["hit@5"], m["hit@20"], m["ndcg@5"]) == (0.0, 1.0, 0.0)
 
 
@@ -117,48 +118,6 @@ def test_generate_resumes_without_repeating_calls(env):
     assert len(ev.read_jsonl(ev.QUESTIONS_PATH)) == 90
 
 
-# --- match ---
-
-TEXT = "ved krav om oppgjør skal salærkrav dokumenteres med spesifisert timeliste og timesats innen 14 dager"
-
-
-def page_chunk(doc, content, page=1, index=0):
-    return {"doc_name": doc, "page_number": page, "chunk_index": index, "content": content}
-
-
-def test_matching_pages_needs_the_text_and_its_numbers():
-    pages = ev.group_by_page([
-        page_chunk("same", f"Innledning. {TEXT}. Slutt."),
-        page_chunk("other_number", TEXT.replace("14", "30") + " og 99"),
-        page_chunk("half", " ".join(TEXT.split()[:13]) + " 14"),
-        page_chunk("unrelated", "noe helt annet 14"),
-    ])
-    assert ev.matching_pages(TEXT, pages) == ["same#p1"]
-
-
-def test_matching_pages_short_text_is_one_run():
-    pages = ev.group_by_page([page_chunk("a", "xx gjelder ikke her yy"), page_chunk("b", "gjelder her ikke")])
-    assert ev.matching_pages("gjelder ikke her", pages) == ["a#p1"]
-    assert ev.matching_pages("•", pages) == []
-
-
-def test_match_adds_once_and_keeps_removed_pages_out(env, monkeypatch):
-    chunks = [page_chunk(d, TEXT) for d in ("doc0.pdf", "doc1.pdf", "doc2.pdf")]
-    monkeypatch.setattr(ev, "load_chunks", lambda: chunks)
-    make_questions(1)
-    ev.match()
-    ev.match()
-    assert ev.read_jsonl(ev.QUESTIONS_PATH)[0]["gold_pages"] == ["doc0.pdf#p1", "doc1.pdf#p1", "doc2.pdf#p1"]
-    rows = ev.read_jsonl(ev.QUESTIONS_PATH)
-    rows[0]["checked"] = False
-    ev.write_jsonl(ev.QUESTIONS_PATH, rows)
-    answers = iter(["r", "doc0.pdf#p1", "r", "doc1.pdf#p1", "k"])
-    monkeypatch.setattr("builtins.input", lambda _: next(answers))
-    ev.check(split="dev")
-    ev.match()
-    assert ev.read_jsonl(ev.QUESTIONS_PATH)[0]["gold_pages"] == ["doc0.pdf#p1", "doc2.pdf#p1"]
-
-
 # --- check ---
 
 def test_check_saves_and_continues(env, monkeypatch):
@@ -166,12 +125,11 @@ def test_check_saves_and_continues(env, monkeypatch):
     for r in rows:
         r["checked"] = False
     ev.write_jsonl(ev.QUESTIONS_PATH, rows)
-    answers = iter(["a", "doc0.pdf#p2", "f", "k", "q"])
+    answers = iter(["f", "k", "q"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
     ev.check()
     saved = ev.read_jsonl(ev.QUESTIONS_PATH)
     assert [r["checked"] for r in saved] == [True, False, False]
-    assert saved[0]["gold_pages"] == ["doc0.pdf#p1", "doc0.pdf#p2"]
     answers = iter(["d", "k"])
     ev.check()
     saved = ev.read_jsonl(ev.QUESTIONS_PATH)
@@ -190,6 +148,18 @@ def test_run_logs_and_reuses_embeddings(env):
     assert first["commit"] == "abc123"
     assert first["metrics"]["hit@1"] == 1.0
     assert first["chunk_count"] == len(CHUNKS)
+    assert first["scorer"] == 2
+    row = ev.read_jsonl(ev.RUNS_DIR / f"{first['run_id']}.jsonl")[0]
+    assert [c["correct"] for c in row["ranked"]] == [True, False]
+
+
+def test_run_needs_an_answer_sentence(env):
+    rows = make_questions()
+    del rows[0]["answer"]
+    ev.write_jsonl(ev.QUESTIONS_PATH, rows)
+    with pytest.raises(SystemExit):
+        ev.run("vector")
+    assert env.embed.call_count == 0
 
 
 def test_run_skips_dropped_and_warns_unchecked(env, capsys):
@@ -213,7 +183,7 @@ def test_run_rejects_uncommitted_changes(env, monkeypatch):
 def test_run_rejects_mismatched_baseline(env):
     rows = make_questions()
     base = ev.run("vector")["run_id"]
-    rows[0]["gold_pages"] = ["doc0.pdf#p2"]
+    rows[0]["answer"] = "noe annet"
     ev.write_jsonl(ev.QUESTIONS_PATH, rows)
     with pytest.raises(SystemExit):
         ev.run("hybrid", baseline=base)

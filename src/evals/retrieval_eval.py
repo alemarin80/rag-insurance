@@ -1,10 +1,12 @@
 """Retrieval-only evaluation: no answer model and no judge.
 
+A retrieved chunk is correct if it contains the question's answer sentence,
+whichever document it comes from.
+
 Spec: docs/specs/step0-retrieval-eval.md
 
 Usage:
     python -m src.evals.retrieval_eval generate
-    python -m src.evals.retrieval_eval match
     python -m src.evals.retrieval_eval check [--split test|dev|all]
     python -m src.evals.retrieval_eval run --mode vector|hybrid [--split dev|test]
         [--baseline RUN_ID] [--allow-dirty]
@@ -15,7 +17,6 @@ import hashlib
 import json
 import math
 import random
-import re
 import statistics
 import subprocess
 import sys
@@ -43,8 +44,7 @@ PER_TYPE = 30
 TEST_PER_TYPE = 10
 TOP_K = 20
 BOOTSTRAP_SAMPLES = 10_000
-RUN_WORDS = 12
-MIN_SHARE = 0.8
+SCORER = 2
 METRICS = ("hit@1", "hit@5", "hit@20", "mrr@20", "ndcg@5")
 PACKAGES = ("google-genai", "pgvector", "psycopg", "pymupdf")
 
@@ -169,12 +169,7 @@ def generate() -> None:
     print(f"Wrote {len(plan)} questions to {QUESTIONS_PATH}.")
 
 
-# --- match ---
-
-def word_runs(text: str, n: int) -> set[tuple[str, ...]]:
-    words = re.findall(r"\w+", text.lower())
-    return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
-
+# --- source text ---
 
 def group_by_page(chunks: list[dict]) -> dict[str, list[dict]]:
     pages: dict[str, list[dict]] = {}
@@ -189,49 +184,6 @@ def source_text(question: dict, pages: dict[str, list[dict]]) -> str | None:
         if c["chunk_index"] == question["source_chunk"]:
             return c["content"]
     return None
-
-
-def matching_pages(text: str, pages: dict[str, list[dict]]) -> list[str]:
-    """Return the pages that repeat the text.
-
-    A page matches if it holds at least MIN_SHARE of the text's runs of RUN_WORDS
-    words, and every number in the text. A shorter text counts as one run.
-    """
-    n = min(RUN_WORDS, len(re.findall(r"\w+", text)))
-    if n == 0:
-        return []
-    runs = word_runs(text, n)
-    numbers = set(re.findall(r"\d+", text))
-    found = []
-    for page, chunks in sorted(pages.items()):
-        # Per chunk, so no run spans two overlapping chunks.
-        page_runs = set().union(*(word_runs(c["content"], n) for c in chunks))
-        page_numbers = {x for c in chunks for x in re.findall(r"\d+", c["content"])}
-        if len(runs & page_runs) / len(runs) >= MIN_SHARE and numbers <= page_numbers:
-            found.append(page)
-    return found
-
-
-def match() -> None:
-    """Add pages that repeat a question's source text to its correct pages."""
-    questions = read_jsonl(QUESTIONS_PATH)
-    if not questions:
-        raise SystemExit(f"No questions. Run generate first ({QUESTIONS_PATH}).")
-    pages = group_by_page(load_chunks())
-    added = changed = 0
-    for q in questions:
-        if q["dropped"]:
-            continue
-        text = source_text(q, pages)
-        if text is None:
-            raise SystemExit(f"The source chunk of {q['id']} is gone. Run match before changing the chunks.")
-        known = {*q["gold_pages"], *q.get("removed_pages", [])}
-        new = [p for p in matching_pages(text, pages) if p not in known]
-        q["gold_pages"] += new
-        added += len(new)
-        changed += bool(new)
-    write_jsonl(QUESTIONS_PATH, questions)
-    print(f"Added {added} pages to {changed} questions.")
 
 
 # --- check ---
@@ -251,38 +203,19 @@ def check(split: str = "test") -> None:
         print(f"\n=== {n}/{len(todo)}  {q['id']}  {q['type']} ===")
         show(q["question"])
         source = q["gold_pages"][0]
+        text = source_text(q, pages)
         print(f"\n--- source chunk ({source}) ---")
-        show(source_text(q, pages) or "Source chunk not found. Press f to see the page.")
+        show(text or "Source chunk not found. Press f to see the page.")
+        print("\n--- answer sentence ---")
+        show(q.get("answer") or "None. A question without one can't be scored.")
         while True:
-            if q["gold_pages"][1:]:
-                print("\nAlso counted as correct: " + ", ".join(q["gold_pages"][1:]))
-            answer = input("\n[k]eep  [d]rop  [a]dd page  [r]emove page  [f]ull pages  [q]uit: ").strip().lower()
+            answer = input("\n[k]eep  [d]rop  [f]ull page  [q]uit: ").strip().lower()
             if answer == "q":
                 return
             if answer == "f":
-                for p in q["gold_pages"]:
-                    print(f"\n--- {p} ---")
-                    for c in pages.get(p, []):
-                        show(c["content"])
-                        print()
-            elif answer == "a":
-                new = input("Page (document.pdf#pN): ").strip()
-                if new not in pages:
-                    print("No such page.")
-                elif new not in q["gold_pages"]:
-                    q["gold_pages"].append(new)
-                    if new in q.get("removed_pages", []):
-                        q["removed_pages"].remove(new)
-                    write_jsonl(QUESTIONS_PATH, questions)
-                    print("Added. Press k to keep the question.")
-            elif answer == "r":
-                old = input("Page to remove (document.pdf#pN): ").strip()
-                if old not in q["gold_pages"][1:]:
-                    print("Only an added page can be removed.")
-                else:
-                    q["gold_pages"].remove(old)
-                    q.setdefault("removed_pages", []).append(old)  # so match doesn't add it again
-                    write_jsonl(QUESTIONS_PATH, questions)
+                for c in pages.get(source, []):
+                    show(c["content"])
+                    print()
             elif answer in ("k", "d"):
                 q["checked"], q["dropped"] = True, answer == "d"
                 write_jsonl(QUESTIONS_PATH, questions)
@@ -292,17 +225,17 @@ def check(split: str = "test") -> None:
 
 # --- metrics ---
 
-def rank_pages(chunks: list) -> list[tuple[str, float]]:
-    """Return unique pages with their score, at the position of their best chunk."""
-    ranked: dict[str, float] = {}
-    for c in chunks:
-        ranked.setdefault(f"{c.doc_name}#p{c.page_number}", float(c.score))
-    return list(ranked.items())
+def normalize(text: str) -> str:
+    return " ".join(text.split()).lower()
 
 
-def score_ranking(ranked: list[str], gold: list[str]) -> dict[str, float]:
-    """Score a page ranking without repeats. Any one gold page answers the question."""
-    first = next((i for i, p in enumerate(ranked[:20], start=1) if p in gold), None)
+def contains_answer(chunk_text: str, answer: str) -> bool:
+    return normalize(answer) in normalize(chunk_text)
+
+
+def score_ranking(correct: list[bool]) -> dict[str, float]:
+    """Score a chunk ranking, given which results are correct. The first correct one counts."""
+    first = next((i for i, c in enumerate(correct[:20], start=1) if c), None)
     out = {f"hit@{k}": float(bool(first) and first <= k) for k in (1, 5, 20)}
     out["mrr@20"] = 1 / first if first else 0.0
     out["ndcg@5"] = 1 / math.log2(first + 1) if first and first <= 5 else 0.0
@@ -384,10 +317,13 @@ def run(mode: str, split: str = "dev", baseline: str | None = None, allow_dirty:
     questions = [q for q in read_jsonl(QUESTIONS_PATH) if q["split"] == split and not q["dropped"]]
     if not questions:
         raise SystemExit(f"No questions in split '{split}' of {QUESTIONS_PATH}.")
+    missing = [q["id"] for q in questions if not q.get("answer")]
+    if missing:
+        raise SystemExit("No answer sentence for: " + ", ".join(missing))
     unchecked = sum(not q["checked"] for q in questions)
     if unchecked:
         print(f"Warning: {unchecked} of {len(questions)} questions in '{split}' are not hand-checked.")
-    used = [[q["id"], q["question"], sorted(q["gold_pages"])] for q in questions]
+    used = [[q["id"], q["question"], q["answer"]] for q in questions]
     questions_hash = sha256(json.dumps(used, ensure_ascii=False).encode())
 
     base = None
@@ -406,13 +342,16 @@ def run(mode: str, split: str = "dev", baseline: str | None = None, allow_dirty:
         t0 = time.perf_counter()
         found = search(q["question"], mode=mode, top_k=TOP_K, query_vector=vector)
         db_ms = (time.perf_counter() - t0) * 1000
-        ranked = rank_pages(found)
+        correct = [contains_answer(c.content, q["answer"]) for c in found]
         results.append({
             "id": q["id"],
             "type": q["type"],
-            "gold_pages": q["gold_pages"],
-            "ranked": [{"page": p, "score": round(s, 4)} for p, s in ranked],
-            "metrics": score_ranking([p for p, _ in ranked], q["gold_pages"]),
+            "answer": q["answer"],
+            "ranked": [
+                {"id": c.id, "page": f"{c.doc_name}#p{c.page_number}", "score": round(float(c.score), 4), "correct": ok}
+                for c, ok in zip(found, correct)
+            ],
+            "metrics": score_ranking(correct),
             "db_ms": round(db_ms, 1),
         })
 
@@ -425,6 +364,7 @@ def run(mode: str, split: str = "dev", baseline: str | None = None, allow_dirty:
         "commit": commit,
         "dirty": bool(changed),
         "method": mode,
+        "scorer": SCORER,
         "chunking": {"size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP},
         "embedding": {"model": EMBED_MODEL, "dim": EMBED_DIM},
         "questions_hash": questions_hash,
@@ -466,7 +406,6 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m src.evals.retrieval_eval", description="Retrieval-only evaluation.")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("generate", help="write the question file once (paid LLM calls)")
-    sub.add_parser("match", help="add pages that repeat a question's source text")
     p = sub.add_parser("check", help="hand-check questions")
     p.add_argument("--split", choices=("test", "dev", "all"), default="test")
     p = sub.add_parser("run", help="score one retrieval method")
@@ -478,8 +417,6 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "generate":
         generate()
-    elif args.command == "match":
-        match()
     elif args.command == "check":
         check(args.split)
     else:
