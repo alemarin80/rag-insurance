@@ -1,17 +1,20 @@
 """Hybrid and vector retrieval over ingested insurance policy chunks.
 
-Supports dense cosine similarity search via pgvector and hybrid search
+Supports dense cosine similarity search via pgvector, hybrid search
 combining pgvector with Norwegian full-text search (tsvector) via Reciprocal
-Rank Fusion (RRF).
+Rank Fusion (RRF), and BM25 word search.
 """
 
 from dataclasses import dataclass
 from google import genai
 from google.genai import types
 from src.ingestion.db import get_conn
+from src.retrieval.bm25 import bm25_search
 from src.llm import EMBED_MODEL, EMBED_DIM
 
 client = genai.Client()
+
+MODES = ("vector", "hybrid", "bm25")
 
 
 @dataclass
@@ -41,10 +44,15 @@ def embed_query(query: str) -> list[float]:
 def search(
     query: str, mode: str = "hybrid", top_k: int = 5, query_vector: list[float] | None = None
 ) -> list[RetrievedChunk]:
-    """Retrieve top_k relevant policy chunks using 'vector' or 'hybrid' (RRF) mode.
+    """Retrieve top_k relevant policy chunks using 'vector', 'hybrid' (RRF) or 'bm25' mode.
 
     Pass query_vector to reuse a saved embedding instead of calling the API.
+    'bm25' needs no embedding and can return fewer than top_k chunks.
     """
+    if mode not in MODES:
+        raise ValueError(f"Unknown search mode {mode!r}. Use one of {', '.join(MODES)}.")
+    if mode == "bm25":
+        return [RetrievedChunk(*r) for r in bm25_search(query, top_k)]
     q_vec = embed_query(query) if query_vector is None else query_vector
     with get_conn() as conn:
         if mode == "vector":

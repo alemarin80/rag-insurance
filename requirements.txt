@@ -2,6 +2,7 @@ annotated-doc==0.0.6
 annotated-types==0.8.0
 anthropic==2.14.0
 anyio==4.16.0
+bm25s==0.3.16
 certifi==2026.11.20
 cffi==2.1.1
 charset-normalizer==3.5.3
@@ -43,6 +44,7 @@ pydantic_core==2.50.5
 Pygments==2.21.0
 pymupdf==1.28.2
 pyparsing==3.3.3
+PyStemmer==3.1.0
 pytest==9.2.0
 python-dateutil==3.0.0
 python-dotenv==1.2.4

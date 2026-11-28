@@ -223,3 +223,13 @@ def test_run_rejects_a_reworded_question_that_copies_the_source(env, monkeypatch
     with pytest.raises(SystemExit):
         ev.run("vector", wording="reworded")
     assert env.embed.call_count == 0
+
+
+def test_run_bm25_needs_no_embeddings(env, monkeypatch):
+    make_questions()
+    monkeypatch.setattr(ev.bm25, "get_index", lambda: None)
+    record = ev.run("bm25")
+    assert env.embed.call_count == 0
+    assert record["embedding"] == {"model": None, "dim": None}
+    assert record["bm25"] == ev.bm25.SETTINGS
+    assert {"bm25s", "PyStemmer"} <= set(record["packages"])

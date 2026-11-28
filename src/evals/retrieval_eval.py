@@ -8,7 +8,7 @@ Spec: docs/specs/step0-retrieval-eval.md
 Usage:
     python -m src.evals.retrieval_eval generate
     python -m src.evals.retrieval_eval check [--split test|dev|all]
-    python -m src.evals.retrieval_eval run --mode vector|hybrid [--split dev|test]
+    python -m src.evals.retrieval_eval run --mode vector|hybrid|bm25 [--split dev|test]
         [--wording original|reworded] [--baseline RUN_ID] [--allow-dirty]
 """
 
@@ -32,7 +32,8 @@ from pydantic import BaseModel
 from src.ingestion.db import get_conn
 from src.ingestion.ingest import CHUNK_OVERLAP, CHUNK_SIZE
 from src.llm import EMBED_DIM, EMBED_MODEL, generate_structured, resolve
-from src.retrieval.search import embed_query, search
+from src.retrieval import bm25
+from src.retrieval.search import MODES, embed_query, search
 
 QUESTIONS_PATH = Path("data/retrieval_eval.jsonl")
 EMBEDDINGS_PATH = Path("data/query_embeddings.jsonl")
@@ -49,6 +50,7 @@ SCORER = 2
 COPY_WORDS = 4  # a reworded question may not repeat this many source words in a row
 METRICS = ("hit@1", "hit@5", "hit@20", "mrr@20", "ndcg@5")
 PACKAGES = ("google-genai", "pgvector", "psycopg", "pymupdf")
+BM25_PACKAGES = ("bm25s", "PyStemmer")
 
 # Same instructions as generate_eval_set() in run_eval.py.
 STYLES = {
@@ -364,10 +366,12 @@ def run(
         if (base["questions_hash"], base["split"]) != (questions_hash, split):
             raise SystemExit("The baseline used different questions or another split.")
 
-    embeddings = get_embeddings(list(texts.values()))
+    embeddings = {} if mode == "bm25" else get_embeddings(list(texts.values()))
+    if mode == "bm25":
+        bm25.get_index()  # build the index before timing the searches
     results = []
     for q in questions:
-        vector, _ = embeddings[texts[q["id"]]]
+        vector = embeddings[texts[q["id"]]][0] if embeddings else None
         t0 = time.perf_counter()
         found = search(texts[q["id"]], mode=mode, top_k=TOP_K, query_vector=vector)
         db_ms = (time.perf_counter() - t0) * 1000
@@ -395,7 +399,8 @@ def run(
         "method": mode,
         "scorer": SCORER,
         "chunking": {"size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP},
-        "embedding": {"model": EMBED_MODEL, "dim": EMBED_DIM},
+        "embedding": {"model": None, "dim": None} if mode == "bm25" else {"model": EMBED_MODEL, "dim": EMBED_DIM},
+        **({"bm25": bm25.SETTINGS} if mode == "bm25" else {}),
         "questions_hash": questions_hash,
         "split": split,
         "wording": wording,
@@ -404,11 +409,11 @@ def run(
         "metrics": mean_metrics(results),
         "metrics_by_type": {t: mean_metrics(rows) for t, rows in by_type.items() if rows},
         "db_ms": time_stats([r["db_ms"] for r in results]),
-        "embed_ms": time_stats([embeddings[t][1] for t in texts.values()]),
+        "embed_ms": time_stats([embeddings[t][1] for t in texts.values()]) if embeddings else None,
         "pdf_sha256": {p.name: sha256(p.read_bytes()) for p in sorted(PDF_DIR.glob("*.pdf"))},
         "chunks_sha256": sha256(json.dumps(chunks, ensure_ascii=False).encode()),
         "chunk_count": len(chunks),
-        "packages": {name: version(name) for name in PACKAGES},
+        "packages": {name: version(name) for name in PACKAGES + (BM25_PACKAGES if mode == "bm25" else ())},
     }
     write_jsonl(RUNS_DIR / f"{run_id}.jsonl", results)
     append_jsonl(RUNS_LOG, record)
@@ -428,7 +433,9 @@ def report(record: dict) -> None:
     print(f"{'type':16}" + "".join(f"{m:>11}" for m in METRICS))
     for name, values in [*record["metrics_by_type"].items(), ("all", record["metrics"])]:
         print(f"{name:16}" + "".join(f"{values[m]:11.3f}" for m in METRICS))
-    for label, key in (("database search", "db_ms"), ("query embedding", "embed_ms")):
+    for label, key in (("search", "db_ms"), ("query embedding", "embed_ms")):
+        if record[key] is None:
+            continue
         print(f"{label}: median {record[key]['median']} ms, p95 {record[key]['p95']} ms")
 
 
@@ -439,7 +446,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("check", help="hand-check questions")
     p.add_argument("--split", choices=("test", "dev", "all"), default="test")
     p = sub.add_parser("run", help="score one retrieval method")
-    p.add_argument("--mode", choices=("vector", "hybrid"), required=True)
+    p.add_argument("--mode", choices=MODES, required=True)
     p.add_argument("--split", choices=("dev", "test"), default="dev")
     p.add_argument("--wording", choices=("original", "reworded"), default="original",
                    help="search with the reworded questions where they exist")
