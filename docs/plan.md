@@ -4,18 +4,22 @@ Evaluation comes first. Each step changes one thing and logs one result.
 
 | Step | Change | Needs new embeddings |
 | :---: | :--- | :--- |
-| 0 | Retrieval-only evaluation ([spec](specs/step0-retrieval-eval.md)) | Queries, once |
+| 0 | Retrieval-only evaluation ([spec](specs/step0-retrieval-eval.md)). Done: `vector` and `hybrid` scored | Queries, once |
 | 1 | BM25 alone, using `bm25s` with a Norwegian stemmer | No |
-| 2 | Dense search alone | No |
-| 3 | Hybrid with Reciprocal Rank Fusion (BM25 and dense) | No |
-| 4 | Sentence chunking (spaCy Norwegian) against 1,200-character windows | All chunks |
+| 2 | Sentence chunking (spaCy Norwegian), chunks allowed to cross pages | All chunks |
+| 3 | Exact duplicate chunks stored once, with every source page | All chunks |
+| 4 | Hybrid with Reciprocal Rank Fusion (BM25 and dense) | No |
 | 5 | Reranker on the top 20 | No |
 | 6 | Generation evaluation, with about 15 hand-graded answers | No |
+| End | Score the `test` questions once | Queries, once |
 
 ## Rules
 
+- Each step gets a spec, approval, code, a run and a result in the README with its flaws.
 - The retrieval questions are generated once and committed. Later steps reuse them.
-- Correct answers are stored as `document#page`, so they stay valid after re-chunking. Chunks must not cross a page boundary.
+- Each question stores its answer sentence. A chunk is correct if it contains it, so the labels survive re-chunking.
+- A change to the scorer gets a new version number. Compare numbers only within one version.
+- Report chunk sizes with every chunking change: larger chunks contain a sentence more easily.
 - Tune on the `dev` questions. Use the `test` questions for final numbers.
 - Each logged run stores its Git commit.
 - Don't run the ingest or `reset chunks` while the embedding API is unavailable. The ingest deletes all chunks before it calls the API.

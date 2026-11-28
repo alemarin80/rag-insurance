@@ -121,3 +121,18 @@ The policies share text, so several pages can answer one question.
 | nDCG@5 | 1 / log2(rank + 1), 0 if the rank is over 5 |
 
 Limit: a page with less than 80% of the text is not added, even if it holds the answer. The hand-check can add such pages to `test` questions. `dev` questions keep the miss.
+
+## Scorer version 2
+
+Status: approved 2026-11-28. It replaces the parts above that conflict with it, including "Proposed change: repeated text".
+
+Version 1 marked results by page. Identical chunks in different documents tied in arbitrary order, and pages that answered a question could be marked wrong.
+
+- Each question has an `answer` field: one sentence or phrase copied from its source chunk, at most 200 characters (the chunk overlap). `answer_by` records who picked it. An AI assistant (Claude) picked all of them.
+- A retrieved chunk is correct if it contains the answer, ignoring case and spacing, whichever document it comes from.
+- Metrics use the chunk ranking, not a page ranking: Hit@1, @5, @20, MRR@20 and nDCG@5 of the first correct chunk.
+- `gold_pages` holds only the source page. The `match` command is removed, and `check` shows the answer sentence.
+- `run` refuses questions without an answer. The question hash covers the answers, so a comparison across different answers fails.
+- Nine questions are dropped (`drop_reason`): five repeat another question's source text, and four can't be answered from their source text. This leaves 53 `dev` and 25 `test` questions.
+- Each run line stores `scorer`. Runs without it are version 1.
+
