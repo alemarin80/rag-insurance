@@ -8,7 +8,7 @@ Spec: docs/specs/step0-retrieval-eval.md
 Usage:
     python -m src.evals.retrieval_eval generate
     python -m src.evals.retrieval_eval check [--split test|dev|all]
-    python -m src.evals.retrieval_eval run --mode vector|hybrid|bm25 [--split dev|test]
+    python -m src.evals.retrieval_eval run --mode vector|hybrid|bm25|hybrid_bm25 [--split dev|test]
         [--wording original|reworded] [--baseline RUN_ID] [--allow-dirty]
 """
 
@@ -33,7 +33,7 @@ from src.ingestion.db import get_conn
 from src.ingestion.ingest import CHUNK_OVERLAP, CHUNK_SIZE
 from src.llm import EMBED_DIM, EMBED_MODEL, generate_structured, resolve
 from src.retrieval import bm25
-from src.retrieval.search import MODES, embed_query, search
+from src.retrieval.search import CANDIDATES, MODES, RRF_K, embed_query, search
 
 QUESTIONS_PATH = Path("data/retrieval_eval.jsonl")
 EMBEDDINGS_PATH = Path("data/query_embeddings.jsonl")
@@ -367,7 +367,8 @@ def run(
             raise SystemExit("The baseline used different questions or another split.")
 
     embeddings = {} if mode == "bm25" else get_embeddings(list(texts.values()))
-    if mode == "bm25":
+    uses_bm25 = mode in ("bm25", "hybrid_bm25")
+    if uses_bm25:
         bm25.get_index()  # build the index before timing the searches
     results = []
     for q in questions:
@@ -400,7 +401,8 @@ def run(
         "scorer": SCORER,
         "chunking": {"size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP},
         "embedding": {"model": None, "dim": None} if mode == "bm25" else {"model": EMBED_MODEL, "dim": EMBED_DIM},
-        **({"bm25": bm25.SETTINGS} if mode == "bm25" else {}),
+        **({"bm25": bm25.SETTINGS} if uses_bm25 else {}),
+        **({"rrf": {"k": RRF_K, "candidates": CANDIDATES}} if mode == "hybrid_bm25" else {}),
         "questions_hash": questions_hash,
         "split": split,
         "wording": wording,
@@ -413,7 +415,7 @@ def run(
         "pdf_sha256": {p.name: sha256(p.read_bytes()) for p in sorted(PDF_DIR.glob("*.pdf"))},
         "chunks_sha256": sha256(json.dumps(chunks, ensure_ascii=False).encode()),
         "chunk_count": len(chunks),
-        "packages": {name: version(name) for name in PACKAGES + (BM25_PACKAGES if mode == "bm25" else ())},
+        "packages": {name: version(name) for name in PACKAGES + (BM25_PACKAGES if uses_bm25 else ())},
     }
     write_jsonl(RUNS_DIR / f"{run_id}.jsonl", results)
     append_jsonl(RUNS_LOG, record)

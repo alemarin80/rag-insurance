@@ -233,3 +233,12 @@ def test_run_bm25_needs_no_embeddings(env, monkeypatch):
     assert record["embedding"] == {"model": None, "dim": None}
     assert record["bm25"] == ev.bm25.SETTINGS
     assert {"bm25s", "PyStemmer"} <= set(record["packages"])
+
+
+def test_run_hybrid_bm25_logs_both_settings(env, monkeypatch):
+    make_questions()
+    monkeypatch.setattr(ev.bm25, "get_index", lambda: None)
+    record = ev.run("hybrid_bm25")
+    assert env.embed.call_count == 4
+    assert record["bm25"] == ev.bm25.SETTINGS
+    assert record["rrf"] == {"k": 60, "candidates": 30}

@@ -1,5 +1,6 @@
-"""Unit tests for src.retrieval.bm25 and the bm25 search mode. No API, no database."""
+"""Unit tests for src.retrieval.bm25 and the bm25 and hybrid_bm25 search modes. No API, no database."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -46,3 +47,47 @@ def test_search_bm25_makes_no_embedding_call(monkeypatch, index):
 def test_unknown_mode_raises():
     with pytest.raises(ValueError):
         search_module.search("spm", mode="keyword")
+
+
+# --- hybrid_bm25 ---
+
+def test_rrf_fuse_hand_computed():
+    fused = search_module.rrf_fuse([1, 2], [2, 3], k=60)
+    assert [i for i, _ in fused] == [2, 1, 3]
+    assert fused[0][1] == pytest.approx(1 / 62 + 1 / 61)
+    assert fused[1][1] == pytest.approx(1 / 61)
+
+
+def test_rrf_fuse_breaks_ties_by_id():
+    assert [i for i, _ in search_module.rrf_fuse([5], [4])] == [4, 5]
+
+
+class FakeConn:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, *args):
+        return SimpleNamespace(fetchall=lambda: self.rows)
+
+
+def test_hybrid_bm25_fuses_both_sides_without_embedding(monkeypatch, index):
+    embed = MagicMock()
+    monkeypatch.setattr(search_module, "embed_query", embed)
+    monkeypatch.setattr(search_module, "get_conn", lambda: FakeConn([r for r in ROWS if r[0] in (2, 3)]))
+    monkeypatch.setattr(search_module, "bm25_search", lambda q, k: bm25.bm25_search(q, k, index=index))
+    found = search_module.search("sykkel", mode="hybrid_bm25", query_vector=[0.1])
+    assert [c.id for c in found] == [3, 2]  # 3 is on both sides
+    embed.assert_not_called()
+
+
+def test_hybrid_bm25_without_word_match_returns_vector_order(monkeypatch, index):
+    monkeypatch.setattr(search_module, "get_conn", lambda: FakeConn([ROWS[2], ROWS[0]]))
+    monkeypatch.setattr(search_module, "bm25_search", lambda q, k: bm25.bm25_search(q, k, index=index))
+    found = search_module.search("kryptovaluta", mode="hybrid_bm25", query_vector=[0.1])
+    assert [c.id for c in found] == [3, 1]
